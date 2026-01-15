@@ -1,12 +1,15 @@
 """Visualization module for projectile trajectories using Plotly."""
 
+import numpy as np
 import plotly.graph_objects as go
 from plotly.graph_objects import Figure
 
 from physics_engine import Projectile
 
 
-def create_trajectory_plot(projectile: Projectile) -> Figure:
+def create_trajectory_plot(
+    projectile: Projectile, show_vacuum: bool = False
+) -> Figure:
     """
     Create a styled Plotly figure showing the projectile trajectory.
 
@@ -14,26 +17,44 @@ def create_trajectory_plot(projectile: Projectile) -> Figure:
     ----------
     projectile : Projectile
         The projectile object to visualize
+    show_vacuum : bool
+        If True, also show the vacuum trajectory for comparison
 
     Returns
     -------
     Figure
         A Plotly figure object with the trajectory plot
     """
-    x, y = projectile.trajectory(num_points=200)
-
     # Create the figure
     fig = go.Figure()
 
-    # Add trajectory line
+    # Add vacuum trajectory if requested
+    if show_vacuum:
+        x_vacuum, y_vacuum = projectile.trajectory_vacuum(num_points=200)
+        fig.add_trace(
+            go.Scatter(
+                x=x_vacuum,
+                y=y_vacuum,
+                mode="lines",
+                name="Vacuum Path",
+                line=dict(color="#888888", width=2, dash="dash"),
+                hovertemplate="<b>Vacuum Path</b><br>" + "x: %{x:.2f} m<br>" + "y: %{y:.2f} m<extra></extra>",
+            )
+        )
+
+    # Add actual trajectory (with or without air resistance)
+    x, y = projectile.trajectory(num_points=200)
+    trajectory_name = "Air Resistance Path" if projectile.cd > 0 else "Trajectory"
+    line_color = "#1f77b4" if projectile.cd == 0 else "#ff7f0e"
+
     fig.add_trace(
         go.Scatter(
             x=x,
             y=y,
             mode="lines",
-            name="Trajectory",
-            line=dict(color="#1f77b4", width=3),
-            hovertemplate="<b>Position</b><br>" + "x: %{x:.2f} m<br>" + "y: %{y:.2f} m<extra></extra>",
+            name=trajectory_name,
+            line=dict(color=line_color, width=3),
+            hovertemplate="<b>" + trajectory_name + "</b><br>" + "x: %{x:.2f} m<br>" + "y: %{y:.2f} m<extra></extra>",
         )
     )
 
@@ -49,23 +70,36 @@ def create_trajectory_plot(projectile: Projectile) -> Figure:
         )
     )
 
-    # Add landing point
-    range_val = projectile.range()
-    fig.add_trace(
-        go.Scatter(
-            x=[range_val],
-            y=[0],
-            mode="markers",
-            name="Landing Point",
-            marker=dict(size=12, color="red", symbol="x"),
-            hovertemplate=f"<b>Landing Point</b><br>x: {range_val:.2f} m<br>y: 0 m<extra></extra>",
+    # Add landing point for actual trajectory
+    if len(x) > 0 and len(y) > 0:
+        range_val = x[-1]
+        fig.add_trace(
+            go.Scatter(
+                x=[range_val],
+                y=[0],
+                mode="markers",
+                name="Landing Point",
+                marker=dict(size=12, color="red", symbol="x"),
+                hovertemplate=f"<b>Landing Point</b><br>x: {range_val:.2f} m<br>y: 0 m<extra></extra>",
+            )
         )
-    )
 
     # Add max height point
-    max_height = projectile.max_height()
-    t_max_height = projectile.v0y / projectile.g
-    x_max_height = projectile.v0x * t_max_height
+    if projectile.cd == 0:
+        # Use analytical solution
+        max_height = projectile.max_height()
+        t_max_height = projectile.v0y / projectile.g
+        x_max_height = projectile.v0x * t_max_height
+    else:
+        # Find max height from trajectory
+        if len(y) > 0:
+            max_height = np.max(y)
+            max_idx = np.argmax(y)
+            x_max_height = x[max_idx] if max_idx < len(x) else 0
+        else:
+            max_height = 0
+            x_max_height = 0
+
     if max_height > 0:
         fig.add_trace(
             go.Scatter(
