@@ -45,13 +45,42 @@ g = st.sidebar.slider(
     help="Acceleration due to gravity in m/s²",
 )
 
-# Create projectile
-projectile = Projectile(v0=v0, theta=theta, g=g)
+cd = st.sidebar.slider(
+    "Air Resistance/Drag (C_d)",
+    min_value=0.0,
+    max_value=0.1,
+    value=0.0,
+    step=0.001,
+    help="Drag coefficient in kg/m. Higher values mean more air resistance.",
+)
 
-# Calculate key metrics
-time_of_flight = projectile.time_of_flight()
-max_height = projectile.max_height()
-range_val = projectile.range()
+# Create projectile with air resistance
+projectile = Projectile(v0=v0, theta=theta, g=g, cd=cd)
+
+# Create vacuum projectile for comparison
+projectile_vacuum = Projectile(v0=v0, theta=theta, g=g, cd=0.0)
+
+# Calculate key metrics (using vacuum solution for display)
+time_of_flight = projectile_vacuum.time_of_flight()
+max_height = projectile_vacuum.max_height()
+range_val = projectile_vacuum.range()
+
+# Calculate actual metrics with air resistance if applicable
+if cd > 0:
+    x_actual, y_actual = projectile.trajectory(num_points=200)
+    if len(x_actual) > 0 and len(y_actual) > 0:
+        range_actual = x_actual[-1]
+        max_height_actual = max(y_actual) if len(y_actual) > 0 else 0
+        # Estimate time of flight from trajectory
+        time_actual = len(x_actual) * 0.01  # Approximate from simulation
+    else:
+        range_actual = 0
+        max_height_actual = 0
+        time_actual = 0
+else:
+    range_actual = range_val
+    max_height_actual = max_height
+    time_actual = time_of_flight
 
 # Display equations section
 st.header("📐 Core Equations")
@@ -59,53 +88,72 @@ st.header("📐 Core Equations")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.markdown("**Horizontal Position:**")
+    st.markdown("**Horizontal Position (Vacuum):**")
     st.latex(r"x(t) = v_0 \cos(\theta) \cdot t")
 
 with col2:
-    st.markdown("**Vertical Position:**")
+    st.markdown("**Vertical Position (Vacuum):**")
     st.latex(r"y(t) = v_0 \sin(\theta) \cdot t - \frac{1}{2}gt^2")
 
 with col3:
-    st.markdown("**Time of Flight:**")
+    st.markdown("**Time of Flight (Vacuum):**")
     st.latex(r"T = \frac{2v_0 \sin(\theta)}{g}")
 
 col4, col5, col6 = st.columns(3)
 
 with col4:
-    st.markdown("**Maximum Height:**")
+    st.markdown("**Maximum Height (Vacuum):**")
     st.latex(r"H_{max} = \frac{(v_0 \sin(\theta))^2}{2g}")
 
 with col5:
-    st.markdown("**Range:**")
+    st.markdown("**Range (Vacuum):**")
     st.latex(r"R = \frac{v_0^2 \sin(2\theta)}{g}")
 
 with col6:
-    st.markdown("**Initial Velocity Components:**")
-    st.latex(r"v_{0x} = v_0 \cos(\theta)")
-    st.latex(r"v_{0y} = v_0 \sin(\theta)")
+    st.markdown("**Drag Force:**")
+    st.latex(r"F_d = -C_d \cdot v^2 \cdot \frac{\vec{v}}{|\vec{v}|}")
 
 # Visualization
 st.header("📊 Trajectory Visualization")
-fig = create_trajectory_plot(projectile)
+show_vacuum = cd > 0  # Show vacuum path when air resistance is enabled
+fig = create_trajectory_plot(projectile, show_vacuum=show_vacuum)
 st.plotly_chart(fig, width="stretch")
 
 # Results section
 st.header("📈 Results")
 
-col7, col8, col9, col10 = st.columns(4)
+if cd > 0:
+    col7, col8, col9, col10 = st.columns(4)
 
-with col7:
-    st.metric("Time of Flight", f"{time_of_flight:.2f} s")
+    with col7:
+        st.metric("Time of Flight (Vacuum)", f"{time_of_flight:.2f} s")
+        st.metric("Time of Flight (Actual)", f"{time_actual:.2f} s", delta=f"{time_actual - time_of_flight:.2f} s")
 
-with col8:
-    st.metric("Maximum Height", f"{max_height:.2f} m")
+    with col8:
+        st.metric("Maximum Height (Vacuum)", f"{max_height:.2f} m")
+        st.metric("Maximum Height (Actual)", f"{max_height_actual:.2f} m", delta=f"{max_height_actual - max_height:.2f} m")
 
-with col9:
-    st.metric("Range", f"{range_val:.2f} m")
+    with col9:
+        st.metric("Range (Vacuum)", f"{range_val:.2f} m")
+        st.metric("Range (Actual)", f"{range_actual:.2f} m", delta=f"{range_actual - range_val:.2f} m")
 
-with col10:
-    st.metric("Initial Speed", f"{v0:.2f} m/s")
+    with col10:
+        st.metric("Initial Speed", f"{v0:.2f} m/s")
+        st.metric("Drag Coefficient", f"{cd:.4f} kg/m")
+else:
+    col7, col8, col9, col10 = st.columns(4)
+
+    with col7:
+        st.metric("Time of Flight", f"{time_of_flight:.2f} s")
+
+    with col8:
+        st.metric("Maximum Height", f"{max_height:.2f} m")
+
+    with col9:
+        st.metric("Range", f"{range_val:.2f} m")
+
+    with col10:
+        st.metric("Initial Speed", f"{v0:.2f} m/s")
 
 # What happened section
 st.header("💡 What Happened?")
@@ -114,48 +162,104 @@ st.header("💡 What Happened?")
 if v0 == 0:
     explanation = "The projectile has no initial velocity, so it doesn't move! Increase the initial velocity to see projectile motion."
 elif theta == 0:
-    explanation = f"""
-    The projectile was launched horizontally (at 0°). 
-    - It travels horizontally for **{range_val:.2f} meters** before hitting the ground.
-    - The maximum height is **0 meters** since it was launched horizontally.
-    - It takes **{time_of_flight:.2f} seconds** to hit the ground.
-    - Since there's no upward component, gravity pulls it straight down!
-    """
+    if cd > 0:
+        explanation = f"""
+        The projectile was launched horizontally (at 0°) with air resistance (C_d = {cd:.4f} kg/m).
+        - **Vacuum path**: It would travel **{range_val:.2f} meters** horizontally.
+        - **Actual path**: It travels **{range_actual:.2f} meters** - air resistance reduces the range!
+        - The maximum height is **0 meters** since it was launched horizontally.
+        - Air resistance slows down the projectile, reducing both speed and distance traveled.
+        """
+    else:
+        explanation = f"""
+        The projectile was launched horizontally (at 0°). 
+        - It travels horizontally for **{range_val:.2f} meters** before hitting the ground.
+        - The maximum height is **0 meters** since it was launched horizontally.
+        - It takes **{time_of_flight:.2f} seconds** to hit the ground.
+        - Since there's no upward component, gravity pulls it straight down!
+        """
 elif theta == 90:
-    explanation = f"""
-    The projectile was launched straight up (at 90°)! 
-    - It reaches a maximum height of **{max_height:.2f} meters**.
-    - It takes **{time_of_flight:.2f} seconds** to go up and come back down.
-    - The range is **0 meters** because it goes straight up and down - no horizontal motion!
-    - This is like throwing a ball straight up in the air.
-    """
+    if cd > 0:
+        explanation = f"""
+        The projectile was launched straight up (at 90°) with air resistance (C_d = {cd:.4f} kg/m)!
+        - **Vacuum path**: It would reach **{max_height:.2f} meters** and take **{time_of_flight:.2f} seconds**.
+        - **Actual path**: It reaches **{max_height_actual:.2f} meters** - air resistance reduces the height!
+        - The range is **0 meters** because it goes straight up and down - no horizontal motion!
+        - Air resistance opposes the upward motion, reducing the maximum height reached.
+        """
+    else:
+        explanation = f"""
+        The projectile was launched straight up (at 90°)! 
+        - It reaches a maximum height of **{max_height:.2f} meters**.
+        - It takes **{time_of_flight:.2f} seconds** to go up and come back down.
+        - The range is **0 meters** because it goes straight up and down - no horizontal motion!
+        - This is like throwing a ball straight up in the air.
+        """
 elif theta < 45:
-    explanation = f"""
-    The projectile was launched at a **shallow angle** ({theta}°).
-    - It travels **{range_val:.2f} meters** horizontally before landing.
-    - It reaches a maximum height of **{max_height:.2f} meters**.
-    - The flight lasts **{time_of_flight:.2f} seconds**.
-    - Shallow angles favor horizontal distance over height - think of a baseball sliding along the ground!
-    """
+    if cd > 0:
+        explanation = f"""
+        The projectile was launched at a **shallow angle** ({theta}°) with air resistance (C_d = {cd:.4f} kg/m).
+        - **Vacuum path**: It would travel **{range_val:.2f} meters** and reach **{max_height:.2f} meters**.
+        - **Actual path**: It travels **{range_actual:.2f} meters** and reaches **{max_height_actual:.2f} meters**.
+        - Air resistance significantly reduces both range and height for shallow angles!
+        - The drag force opposes motion in both horizontal and vertical directions.
+        """
+    else:
+        explanation = f"""
+        The projectile was launched at a **shallow angle** ({theta}°).
+        - It travels **{range_val:.2f} meters** horizontally before landing.
+        - It reaches a maximum height of **{max_height:.2f} meters**.
+        - The flight lasts **{time_of_flight:.2f} seconds**.
+        - Shallow angles favor horizontal distance over height - think of a baseball sliding along the ground!
+        """
 elif theta == 45:
-    explanation = f"""
-    The projectile was launched at the **optimal angle** (45°) for maximum range!
-    - It travels **{range_val:.2f} meters** horizontally - this is the farthest it can go with this initial velocity.
-    - It reaches a maximum height of **{max_height:.2f} meters**.
-    - The flight lasts **{time_of_flight:.2f} seconds**.
-    - At 45°, the horizontal and vertical components are balanced perfectly for maximum distance!
-    """
+    if cd > 0:
+        explanation = f"""
+        The projectile was launched at the **optimal angle** (45°) for maximum range in vacuum, with air resistance (C_d = {cd:.4f} kg/m)!
+        - **Vacuum path**: It would travel **{range_val:.2f} meters** - the theoretical maximum.
+        - **Actual path**: It travels **{range_actual:.2f} meters** - air resistance reduces the range!
+        - With air resistance, the optimal angle is actually less than 45°!
+        - Air resistance affects the trajectory, making it shorter and steeper.
+        """
+    else:
+        explanation = f"""
+        The projectile was launched at the **optimal angle** (45°) for maximum range!
+        - It travels **{range_val:.2f} meters** horizontally - this is the farthest it can go with this initial velocity.
+        - It reaches a maximum height of **{max_height:.2f} meters**.
+        - The flight lasts **{time_of_flight:.2f} seconds**.
+        - At 45°, the horizontal and vertical components are balanced perfectly for maximum distance!
+        """
 else:  # theta > 45
-    explanation = f"""
-    The projectile was launched at a **steep angle** ({theta}°).
-    - It travels **{range_val:.2f} meters** horizontally before landing.
-    - It reaches a maximum height of **{max_height:.2f} meters** - quite high!
-    - The flight lasts **{time_of_flight:.2f} seconds**.
-    - Steep angles favor height over distance - think of shooting a basketball high into the air!
-    """
+    if cd > 0:
+        explanation = f"""
+        The projectile was launched at a **steep angle** ({theta}°) with air resistance (C_d = {cd:.4f} kg/m).
+        - **Vacuum path**: It would travel **{range_val:.2f} meters** and reach **{max_height:.2f} meters**.
+        - **Actual path**: It travels **{range_actual:.2f} meters** and reaches **{max_height_actual:.2f} meters**.
+        - Steep angles favor height over distance, but air resistance reduces both!
+        - The drag force is most significant when the projectile is moving fastest.
+        """
+    else:
+        explanation = f"""
+        The projectile was launched at a **steep angle** ({theta}°).
+        - It travels **{range_val:.2f} meters** horizontally before landing.
+        - It reaches a maximum height of **{max_height:.2f} meters** - quite high!
+        - The flight lasts **{time_of_flight:.2f} seconds**.
+        - Steep angles favor height over distance - think of shooting a basketball high into the air!
+        """
 
 # Add general physics explanation
-explanation += f"""
+if cd > 0:
+    explanation += """
+
+**The Physics Behind It:**
+- The projectile follows a **parabolic path in vacuum**, but air resistance creates a **shorter, steeper trajectory**.
+- Air resistance (drag) is proportional to the square of velocity: F_d = -C_d · v²
+- The drag force opposes motion in both horizontal and vertical directions, reducing speed over time.
+- We use **Symplectic Euler-Cromer numerical integration** to solve the equations since there's no closed-form solution with air resistance.
+- Notice how the actual path (orange) is always shorter than the vacuum path (gray dashed line)!
+"""
+else:
+    explanation += """
 
 **The Physics Behind It:**
 - The projectile follows a **parabolic path** due to gravity pulling it downward.
