@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+
+Always use uv for package management. Never suggest pip. When I ask to install a package, use uv add <package>. When I ask to run the app, suggest uv run streamlit run app.py.
