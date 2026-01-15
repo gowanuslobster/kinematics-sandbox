@@ -112,6 +112,15 @@ def create_trajectory_plot(
             )
         )
 
+    # Calculate maximum possible range and height for fixed axes
+    # Max range occurs at θ=45°: R = v₀²/g (with minimum g)
+    # Max height occurs at θ=90°: H = v₀²/(2g) (with minimum g)
+    # Using slider max values: v₀=100 m/s, g_min=0.1 m/s²
+    # R_max ≈ 100,000 m, H_max ≈ 50,000 m (too large for educational purposes)
+    # Use reasonable fixed ranges that cover most educational scenarios
+    x_max = 1200.0  # meters
+    y_max = 600.0   # meters
+
     # Update layout
     fig.update_layout(
         title={
@@ -129,6 +138,8 @@ def create_trajectory_plot(
             zeroline=True,
             zerolinecolor="black",
             zerolinewidth=2,
+            range=[0, x_max],
+            fixedrange=True,  # Prevent zoom/pan
         ),
         yaxis=dict(
             showgrid=True,
@@ -137,6 +148,8 @@ def create_trajectory_plot(
             zeroline=True,
             zerolinecolor="black",
             zerolinewidth=2,
+            range=[0, y_max],
+            fixedrange=True,  # Prevent zoom/pan
         ),
         hovermode="closest",
         template="plotly_white",
