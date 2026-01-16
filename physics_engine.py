@@ -232,3 +232,34 @@ class Projectile:
             Tuple of (x positions, y positions) in meters
         """
         return self._trajectory_vacuum(num_points)
+
+    def check_hit(self, target_x: float, target_y: float, threshold: float = 1.5) -> bool:
+        """
+        Check if the projectile hits the target.
+
+        Parameters
+        ----------
+        target_x : float
+            X coordinate of the target in meters
+        target_y : float
+            Y coordinate of the target in meters
+        threshold : float
+            Hit detection threshold in meters (default: 1.5)
+
+        Returns
+        -------
+        bool
+            True if the projectile passes within threshold distance of the target
+        """
+        # Get trajectory points with high resolution for accurate hit detection
+        x, y = self.trajectory(num_points=1000)
+
+        if len(x) == 0 or len(y) == 0:
+            return False
+
+        # Calculate distances from target to each point on trajectory
+        distances = np.sqrt((x - target_x) ** 2 + (y - target_y) ** 2)
+
+        # Check if minimum distance is within threshold
+        min_distance = np.min(distances)
+        return min_distance <= threshold
