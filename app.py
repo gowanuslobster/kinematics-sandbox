@@ -55,6 +55,7 @@ cd = st.sidebar.slider(
     max_value=EARTH_DRAG * 10.0,  # 10x Earth's atmosphere
     value=EARTH_DRAG,  # Start at Earth's atmosphere
     step=0.0001,
+    format="%.4f",
     help=f"Drag coefficient in kg/m. Earth's atmosphere ≈ {EARTH_DRAG:.4f} kg/m (for a 10cm, 1kg sphere).",
 )
 
