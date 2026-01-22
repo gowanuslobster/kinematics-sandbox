@@ -8,7 +8,12 @@ from physics_engine import Projectile
 
 
 def create_trajectory_plot(
-    projectile: Projectile, show_vacuum: bool = False
+    projectile: Projectile,
+    show_vacuum: bool = False,
+    target_x: float | None = None,
+    target_y: float | None = None,
+    target_diameter: float = 3.0,
+    target_hit: bool = False,
 ) -> Figure:
     """
     Create a styled Plotly figure showing the projectile trajectory.
@@ -19,6 +24,14 @@ def create_trajectory_plot(
         The projectile object to visualize
     show_vacuum : bool
         If True, also show the vacuum trajectory for comparison
+    target_x : float | None
+        X coordinate of the target (optional)
+    target_y : float | None
+        Y coordinate of the target (optional)
+    target_diameter : float
+        Diameter of the target in meters (default: 3.0)
+    target_hit : bool
+        Whether the target was hit (default: False)
 
     Returns
     -------
@@ -112,14 +125,69 @@ def create_trajectory_plot(
             )
         )
 
-    # Calculate maximum possible range and height for fixed axes
-    # Max range occurs at θ=45°: R = v₀²/g (with minimum g)
-    # Max height occurs at θ=90°: H = v₀²/(2g) (with minimum g)
-    # Using slider max values: v₀=100 m/s, g_min=0.1 m/s²
-    # R_max ≈ 100,000 m, H_max ≈ 50,000 m (too large for educational purposes)
-    # Use reasonable fixed ranges that cover most educational scenarios
-    x_max = 1200.0  # meters
-    y_max = 600.0   # meters
+    # Add target if specified
+    if target_x is not None and target_y is not None:
+        # Choose color based on hit status
+        target_color = "red" if target_hit else "black"
+        # Add center marker
+        fig.add_trace(
+            go.Scatter(
+                x=[target_x],
+                y=[target_y],
+                mode="markers",
+                name="Target Center",
+                marker=dict(size=8, color=target_color, symbol="circle"),
+                hovertemplate=f"<b>Target</b><br>x: {target_x:.2f} m<br>y: {target_y:.2f} m<br>diameter: {target_diameter:.2f} m<extra></extra>",
+                showlegend=False,
+            )
+        )
+
+    # Calculate axis ranges based on target location + margin
+    # If target is specified, use it to set the scale; otherwise use defaults
+    margin_x = 100.0  # meters margin
+    margin_y = 50.0   # meters margin
+
+    if target_x is not None and target_y is not None:
+        # Calculate ranges to include target with margin
+        # Always include launch point (0, 0) and target (including its diameter)
+        target_radius = target_diameter / 2.0
+        x_max = max(target_x + target_radius + margin_x, margin_x, 200.0)  # At least 200m wide
+        y_max = max(target_y + target_radius + margin_y, margin_y, 100.0)  # At least 100m tall
+        
+        # Also consider trajectory extent
+        if len(x) > 0 and len(y) > 0:
+            x_max = max(x_max, np.max(x) + margin_x)
+            y_max = max(y_max, np.max(y) + margin_y)
+    else:
+        # Default ranges when no target
+        x_max = 1200.0  # meters
+        y_max = 600.0   # meters
+        
+        # Still consider trajectory extent
+        if len(x) > 0 and len(y) > 0:
+            x_max = max(x_max, np.max(x) + margin_x)
+            y_max = max(y_max, np.max(y) + margin_y)
+
+    # Add target circle shape if target is specified
+    shapes = []
+    if target_x is not None and target_y is not None:
+        target_radius = target_diameter / 2.0
+        # Choose color based on hit status
+        target_color = "red" if target_hit else "black"
+        target_fill = "rgba(255, 0, 0, 0.2)" if target_hit else "rgba(0, 0, 0, 0.1)"
+        shapes.append(
+            dict(
+                type="circle",
+                xref="x",
+                yref="y",
+                x0=target_x - target_radius,
+                y0=target_y - target_radius,
+                x1=target_x + target_radius,
+                y1=target_y + target_radius,
+                line=dict(color=target_color, width=2),
+                fillcolor=target_fill,
+            )
+        )
 
     # Update layout
     fig.update_layout(
@@ -156,6 +224,7 @@ def create_trajectory_plot(
         height=600,
         showlegend=True,
         legend=dict(x=0.02, y=0.98, bgcolor="rgba(255,255,255,0.8)"),
+        shapes=shapes,
     )
 
     return fig

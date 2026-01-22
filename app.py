@@ -1,5 +1,6 @@
 """Streamlit app for Kinematics Sandbox - Interactive projectile motion visualization."""
 
+import numpy as np
 import streamlit as st
 from physics_engine import Projectile
 from visualizer import create_trajectory_plot
@@ -45,13 +46,50 @@ g = st.sidebar.slider(
     help="Acceleration due to gravity in m/s²",
 )
 
+# Earth's atmosphere drag coefficient for reference
+EARTH_DRAG = 0.0022  # kg/m for a 10cm diameter, 1kg smooth sphere at STP
+
 cd = st.sidebar.slider(
     "Air Resistance/Drag (C_d)",
     min_value=0.0,
-    max_value=0.1,
-    value=0.0,
-    step=0.001,
-    help="Drag coefficient in kg/m. Higher values mean more air resistance.",
+    max_value=EARTH_DRAG * 10.0,  # 10x Earth's atmosphere
+    value=EARTH_DRAG,  # Start at Earth's atmosphere
+    step=0.0001,
+    format="%.4f",
+    help=f"Drag coefficient in kg/m. Earth's atmosphere ≈ {EARTH_DRAG:.4f} kg/m (for a 10cm, 1kg sphere).",
+)
+
+# Show Earth's drag reference marker
+st.sidebar.caption(f"🌍 Earth's atmosphere: {EARTH_DRAG:.4f} kg/m")
+
+# Target settings
+st.sidebar.header("Target Settings")
+
+target_x = st.sidebar.slider(
+    "Target X",
+    min_value=0.0,
+    max_value=1200.0,
+    value=100.0,
+    step=10.0,
+    help="X coordinate of the target in meters",
+)
+
+target_y = st.sidebar.slider(
+    "Target Y",
+    min_value=0.0,
+    max_value=600.0,
+    value=50.0,
+    step=10.0,
+    help="Y coordinate of the target in meters",
+)
+
+target_diameter = st.sidebar.slider(
+    "Target Diameter",
+    min_value=0.5,
+    max_value=50.0,
+    value=3.0,
+    step=0.5,
+    help="Diameter of the target in meters",
 )
 
 # Create projectile with air resistance
@@ -113,11 +151,52 @@ with col6:
     st.markdown("**Drag Force:**")
     st.latex(r"F_d = -C_d \cdot v^2 \cdot \frac{\vec{v}}{|\vec{v}|}")
 
+# Hit detection (before visualization so we can color the target)
+hit = False
+if target_x is not None and target_y is not None:
+    # Use target radius (diameter/2) as the hit detection threshold
+    hit = projectile.check_hit(target_x, target_y, threshold=target_diameter / 2.0)
+
 # Visualization
 st.header("📊 Trajectory Visualization")
 show_vacuum = cd > 0  # Show vacuum path when air resistance is enabled
-fig = create_trajectory_plot(projectile, show_vacuum=show_vacuum)
+fig = create_trajectory_plot(
+    projectile,
+    show_vacuum=show_vacuum,
+    target_x=target_x,
+    target_y=target_y,
+    target_diameter=target_diameter,
+    target_hit=hit,
+)
 st.plotly_chart(fig, width="stretch")
+
+# Hit detection and feedback
+if target_x is not None and target_y is not None:
+    
+    if hit:
+        st.success("🎯 **TARGET HIT!**", icon="🎯")
+    else:
+        # Get trajectory to find closest point and provide hints
+        x_traj, y_traj = projectile.trajectory(num_points=200)
+        if len(x_traj) > 0 and len(y_traj) > 0:
+            # Find closest point on trajectory to target
+            distances = np.sqrt((x_traj - target_x) ** 2 + (y_traj - target_y) ** 2)
+            min_idx = np.argmin(distances)
+            closest_x = x_traj[min_idx]
+            closest_y = y_traj[min_idx]
+            final_x = x_traj[-1]
+            
+            # Provide helpful hints based on position
+            if final_x < target_x:
+                st.warning("💡 **Too short!** The projectile lands before reaching the target. Try increasing the initial velocity or adjusting the angle.")
+            elif final_x > target_x:
+                st.warning("💡 **Too far!** The projectile overshoots the target. Try decreasing the initial velocity or adjusting the angle.")
+            else:
+                # Check if we're too high or too low
+                if closest_y < target_y:
+                    st.warning("💡 **Too low!** The trajectory passes below the target. Try increasing the launch angle.")
+                else:
+                    st.warning("💡 **Too high!** The trajectory passes above the target. Try decreasing the launch angle.")
 
 # Results section
 st.header("📈 Results")
