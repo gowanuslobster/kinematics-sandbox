@@ -92,11 +92,66 @@ target_diameter = st.sidebar.slider(
     help="Diameter of the target in meters",
 )
 
+# Animation settings
+st.sidebar.header("Display Settings")
+
+animate_launch = st.sidebar.checkbox(
+    "Animate Launch",
+    value=False,
+    help="If enabled, the trajectory will animate over time. If disabled, the full path appears instantly.",
+)
+
+# Initialize session state for ghost path (previous trajectory)
+if "prev_trajectory" not in st.session_state:
+    st.session_state.prev_trajectory = None
+if "prev_params" not in st.session_state:
+    st.session_state.prev_params = None
+
+# Check if parameters changed (to show ghost path)
+current_params = (v0, theta, g, cd, target_x, target_y)
+params_changed = st.session_state.prev_params != current_params
+
 # Create projectile with air resistance
 projectile = Projectile(v0=v0, theta=theta, g=g, cd=cd)
 
 # Create vacuum projectile for comparison
 projectile_vacuum = Projectile(v0=v0, theta=theta, g=g, cd=0.0)
+
+# Calculate fixed axis ranges based on maximum possible range and target
+# Default axis maximums
+default_x_max = 200.0  # meters
+default_y_max = 100.0  # meters
+
+margin_x = 150.0  # meters margin
+margin_y = 75.0   # meters margin
+
+# Calculate theoretical maximum range and height
+max_v0 = 100.0  # From slider max
+min_g = 0.1  # From slider min (but use actual g if > 0.1)
+effective_g = max(g, 0.1)  # Avoid division by zero
+max_range_theoretical = (max_v0 ** 2) / effective_g  # At 45 degrees
+max_height_theoretical = (max_v0 ** 2) / (2 * effective_g)  # At 90 degrees
+
+# Consider target position and theoretical maximums
+if target_x is not None and target_y is not None:
+    target_radius = target_diameter / 2.0
+    x_max = max(
+        default_x_max,
+        max_range_theoretical + margin_x,
+        target_x + target_radius + margin_x,
+    )
+    y_max = max(
+        default_y_max,
+        max_height_theoretical + margin_y,
+        target_y + target_radius + margin_y,
+    )
+else:
+    x_max = max(default_x_max, max_range_theoretical + margin_x)
+    y_max = max(default_y_max, max_height_theoretical + margin_y)
+
+# Fixed axis ranges
+x_range = (0.0, x_max)
+y_range = (0.0, y_max)
 
 # Calculate key metrics (using vacuum solution for display)
 time_of_flight = projectile_vacuum.time_of_flight()
@@ -104,11 +159,12 @@ max_height = projectile_vacuum.max_height()
 range_val = projectile_vacuum.range()
 
 # Calculate actual metrics with air resistance if applicable
+# Use high resolution for accurate metrics
 if cd > 0:
-    x_actual, y_actual = projectile.trajectory(num_points=200)
+    x_actual, y_actual = projectile.trajectory(num_points=500)
     if len(x_actual) > 0 and len(y_actual) > 0:
         range_actual = x_actual[-1]
-        max_height_actual = max(y_actual) if len(y_actual) > 0 else 0
+        max_height_actual = np.max(y_actual) if len(y_actual) > 0 else 0
         # Estimate time of flight from trajectory
         time_actual = len(x_actual) * 0.01  # Approximate from simulation
     else:
@@ -160,15 +216,90 @@ if target_x is not None and target_y is not None:
 # Visualization
 st.header("📊 Trajectory Visualization")
 show_vacuum = cd > 0  # Show vacuum path when air resistance is enabled
-fig = create_trajectory_plot(
-    projectile,
-    show_vacuum=show_vacuum,
-    target_x=target_x,
-    target_y=target_y,
-    target_diameter=target_diameter,
-    target_hit=hit,
-)
-st.plotly_chart(fig, width="stretch")
+
+# Get ghost path if parameters changed
+ghost_path = None
+if params_changed and st.session_state.prev_trajectory is not None:
+    ghost_path = st.session_state.prev_trajectory
+
+# Generate current trajectory with high resolution for smooth display
+num_points = 500  # High resolution for smooth curves
+x_current, y_current = projectile.trajectory(num_points=num_points)
+
+# Store current trajectory for next iteration (as ghost path)
+st.session_state.prev_trajectory = (x_current.copy(), y_current.copy())
+st.session_state.prev_params = current_params
+
+# Create visualization
+if animate_launch and len(x_current) > 0:
+    # Animated path using Plotly frames
+    chart_placeholder = st.empty()
+    num_frames = min(len(x_current), 50)  # Limit frames for performance
+    frame_indices = np.linspace(0, len(x_current) - 1, num_frames, dtype=int)
+    
+    # Create a simple wrapper class for partial trajectories
+    class PartialProjectile:
+        def __init__(self, proj, x_part, y_part):
+            self.cd = proj.cd
+            self.v0x = proj.v0x
+            self.v0y = proj.v0y
+            self.g = proj.g
+            self.x_part = x_part
+            self.y_part = y_part
+        
+        def trajectory(self, num_points=100):
+            return self.x_part, self.y_part
+        
+        def trajectory_vacuum(self, num_points=100):
+            return self.x_part, self.y_part
+    
+    # Show progressive frames quickly
+    for i in frame_indices:
+        x_partial = x_current[:i + 1]
+        y_partial = y_current[:i + 1]
+        
+        temp_proj = PartialProjectile(projectile, x_partial, y_partial)
+        
+        fig = create_trajectory_plot(
+            temp_proj,
+            show_vacuum=show_vacuum,
+            target_x=target_x,
+            target_y=target_y,
+            target_diameter=target_diameter,
+            target_hit=False,  # Don't check hit during animation
+            ghost_path=ghost_path,
+            x_range=x_range,
+            y_range=y_range,
+        )
+        chart_placeholder.plotly_chart(fig, width="stretch", use_container_width=True)
+    
+    # Final frame with full trajectory and hit detection
+    fig = create_trajectory_plot(
+        projectile,
+        show_vacuum=show_vacuum,
+        target_x=target_x,
+        target_y=target_y,
+        target_diameter=target_diameter,
+        target_hit=hit,
+        ghost_path=ghost_path,
+        x_range=x_range,
+        y_range=y_range,
+    )
+    chart_placeholder.plotly_chart(fig, width="stretch", use_container_width=True)
+else:
+    # Instant full trajectory
+    fig = create_trajectory_plot(
+        projectile,
+        show_vacuum=show_vacuum,
+        target_x=target_x,
+        target_y=target_y,
+        target_diameter=target_diameter,
+        target_hit=hit,
+        ghost_path=ghost_path,
+        x_range=x_range,
+        y_range=y_range,
+    )
+    st.plotly_chart(fig, width="stretch")
 
 # Hit detection and feedback
 if target_x is not None and target_y is not None:

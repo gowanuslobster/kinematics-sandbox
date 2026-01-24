@@ -138,7 +138,7 @@ class Projectile:
 
     def _trajectory_with_drag(self, num_points: int = 100) -> tuple[np.ndarray, np.ndarray]:
         """
-        Generate trajectory points using Symplectic Euler-Cromer integration.
+        Generate trajectory points using vectorized Symplectic Euler-Cromer integration.
 
         Parameters
         ----------
@@ -153,68 +153,88 @@ class Projectile:
         if self.v0 <= 0:
             return np.array([0.0]), np.array([0.0])
 
-        # Time step - adaptive based on initial velocity
+        # Time step - optimized for performance
         dt = 0.01  # seconds
-        max_time = 100.0  # maximum simulation time
-
-        # Initialize arrays
-        x_list = [0.0]
-        y_list = [0.0]
-        vx = self.v0x
-        vy = self.v0y
-
-        t = 0.0
-        while y_list[-1] >= 0 and t < max_time:
-            # Calculate speed
-            v = np.sqrt(vx**2 + vy**2)
-
-            if v < 1e-6:  # Stop if velocity is negligible
-                break
-
-            # Calculate drag force components
-            # F_d = -cd * v^2 * (v/|v|) = -cd * v * v_vector
-            drag_x = -self.cd * v * vx
-            drag_y = -self.cd * v * vy
-
-            # Calculate accelerations
-            ax = drag_x  # No gravity in x-direction
-            ay = -self.g + drag_y  # Gravity + drag in y-direction
-
-            # Symplectic Euler-Cromer: update velocity first, then position
-            vx = vx + ax * dt
-            vy = vy + ay * dt
-
-            # Update position using new velocity
-            x_new = x_list[-1] + vx * dt
-            y_new = y_list[-1] + vy * dt
-
-            # Stop if projectile hits ground
-            if y_new < 0:
+        max_steps = 10000  # maximum number of steps (100 seconds / 0.01)
+        
+        # Pre-allocate arrays for maximum performance
+        # We'll resize later if needed
+        x_array = np.zeros(max_steps + 1, dtype=np.float64)
+        y_array = np.zeros(max_steps + 1, dtype=np.float64)
+        vx_array = np.zeros(max_steps + 1, dtype=np.float64)
+        vy_array = np.zeros(max_steps + 1, dtype=np.float64)
+        
+        # Initialize first values
+        x_array[0] = 0.0
+        y_array[0] = 0.0
+        vx_array[0] = self.v0x
+        vy_array[0] = self.v0y
+        
+        # Vectorized integration loop
+        for i in range(max_steps):
+            # Current state
+            x_curr = x_array[i]
+            y_curr = y_array[i]
+            vx_curr = vx_array[i]
+            vy_curr = vy_array[i]
+            
+            # Check if we've hit the ground
+            if y_curr < 0:
                 # Interpolate to find exact landing point
-                if len(y_list) > 0:
-                    y_prev = y_list[-1]
+                if i > 0:
+                    y_prev = y_array[i - 1]
                     if y_prev > 0:
                         # Linear interpolation to find x when y=0
-                        t_frac = -y_prev / (y_new - y_prev)
-                        x_landing = x_list[-1] + (x_new - x_list[-1]) * t_frac
-                        x_list.append(x_landing)
-                        y_list.append(0.0)
+                        t_frac = -y_prev / (y_curr - y_prev)
+                        x_landing = x_array[i - 1] + (x_curr - x_array[i - 1]) * t_frac
+                        x_array[i] = x_landing
+                        y_array[i] = 0.0
+                        # Trim arrays to actual length
+                        x_array = x_array[:i + 1]
+                        y_array = y_array[:i + 1]
+                        break
+                else:
+                    x_array = x_array[:1]
+                    y_array = y_array[:1]
+                    break
+            
+            # Calculate speed using vectorized operation
+            v = np.sqrt(vx_curr * vx_curr + vy_curr * vy_curr)
+            
+            if v < 1e-6:  # Stop if velocity is negligible
+                x_array = x_array[:i + 1]
+                y_array = y_array[:i + 1]
                 break
-
-            x_list.append(x_new)
-            y_list.append(y_new)
-            t += dt
-
-        # Convert to numpy arrays
-        x_array = np.array(x_list)
-        y_array = np.array(y_list)
-
-        # Downsample to requested number of points if needed
+            
+            # Calculate drag force components (vectorized)
+            # F_d = -cd * v^2 * (v/|v|) = -cd * v * v_vector
+            drag_x = -self.cd * v * vx_curr
+            drag_y = -self.cd * v * vy_curr
+            
+            # Calculate accelerations (vectorized)
+            ax = drag_x  # No gravity in x-direction
+            ay = -self.g + drag_y  # Gravity + drag in y-direction
+            
+            # Symplectic Euler-Cromer: update velocity first, then position
+            vx_next = vx_curr + ax * dt
+            vy_next = vy_curr + ay * dt
+            
+            # Update position using new velocity
+            x_next = x_curr + vx_next * dt
+            y_next = y_curr + vy_next * dt
+            
+            # Store next state
+            x_array[i + 1] = x_next
+            y_array[i + 1] = y_next
+            vx_array[i + 1] = vx_next
+            vy_array[i + 1] = vy_next
+        
+        # Downsample to requested number of points if needed (vectorized)
         if len(x_array) > num_points:
             indices = np.linspace(0, len(x_array) - 1, num_points, dtype=int)
             x_array = x_array[indices]
             y_array = y_array[indices]
-
+        
         return x_array, y_array
 
     def trajectory_vacuum(self, num_points: int = 100) -> tuple[np.ndarray, np.ndarray]:
