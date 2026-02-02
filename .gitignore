@@ -1,10 +1,33 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
+# --- Python Packaging & Artifacts ---
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
+*.whl
 
-# Virtual environments
-.venv
+# --- Python Logic & Caches ---
+__pycache__/
+.ruff_cache/
+.pytest_cache/
+.venv/
+venv/
+.streamlit/
+*.py[oc]
+
+# --- Jupyter ---
+*.ipynb_checkpoints/
+
+# --- Web Frontend (kinematics-web) ---
+kinematics-web/node_modules/
+kinematics-web/dist/
+kinematics-web/dist-ssr/
+kinematics-web/*.local
+
+# --- AI Tools & Editors ---
+.cursor/
+.codex/
+.vscode/
+.DS_Store
+
+*storybook.log
+storybook-static
