@@ -14,6 +14,9 @@ def create_trajectory_plot(
     target_y: float | None = None,
     target_diameter: float = 3.0,
     target_hit: bool = False,
+    ghost_path: tuple[np.ndarray, np.ndarray] | None = None,
+    x_range: tuple[float, float] | None = None,
+    y_range: tuple[float, float] | None = None,
 ) -> Figure:
     """
     Create a styled Plotly figure showing the projectile trajectory.
@@ -32,6 +35,12 @@ def create_trajectory_plot(
         Diameter of the target in meters (default: 3.0)
     target_hit : bool
         Whether the target was hit (default: False)
+    ghost_path : tuple[np.ndarray, np.ndarray] | None
+        Previous trajectory to show as ghost path (optional)
+    x_range : tuple[float, float] | None
+        Fixed x-axis range (min, max) (optional)
+    y_range : tuple[float, float] | None
+        Fixed y-axis range (min, max) (optional)
 
     Returns
     -------
@@ -41,9 +50,25 @@ def create_trajectory_plot(
     # Create the figure
     fig = go.Figure()
 
+    # Add ghost path (previous trajectory) if provided
+    if ghost_path is not None:
+        x_ghost, y_ghost = ghost_path
+        if len(x_ghost) > 0 and len(y_ghost) > 0:
+            fig.add_trace(
+                go.Scatter(
+                    x=x_ghost,
+                    y=y_ghost,
+                    mode="lines",
+                    name="Previous Path",
+                    line=dict(color="#cccccc", width=2, dash="dot"),
+                    opacity=0.6,
+                    hovertemplate="<b>Previous Path</b><br>" + "x: %{x:.2f} m<br>" + "y: %{y:.2f} m<extra></extra>",
+                )
+            )
+
     # Add vacuum trajectory if requested
     if show_vacuum:
-        x_vacuum, y_vacuum = projectile.trajectory_vacuum(num_points=200)
+        x_vacuum, y_vacuum = projectile.trajectory_vacuum(num_points=500)
         fig.add_trace(
             go.Scatter(
                 x=x_vacuum,
@@ -56,7 +81,7 @@ def create_trajectory_plot(
         )
 
     # Add actual trajectory (with or without air resistance)
-    x, y = projectile.trajectory(num_points=200)
+    x, y = projectile.trajectory(num_points=500)
     trajectory_name = "Air Resistance Path" if projectile.cd > 0 else "Trajectory"
     line_color = "#1f77b4" if projectile.cd == 0 else "#ff7f0e"
 
@@ -142,31 +167,38 @@ def create_trajectory_plot(
             )
         )
 
-    # Calculate axis ranges based on target location + margin
-    # If target is specified, use it to set the scale; otherwise use defaults
-    margin_x = 100.0  # meters margin
-    margin_y = 50.0   # meters margin
-
-    if target_x is not None and target_y is not None:
-        # Calculate ranges to include target with margin
-        # Always include launch point (0, 0) and target (including its diameter)
-        target_radius = target_diameter / 2.0
-        x_max = max(target_x + target_radius + margin_x, margin_x, 200.0)  # At least 200m wide
-        y_max = max(target_y + target_radius + margin_y, margin_y, 100.0)  # At least 100m tall
-        
-        # Also consider trajectory extent
-        if len(x) > 0 and len(y) > 0:
-            x_max = max(x_max, np.max(x) + margin_x)
-            y_max = max(y_max, np.max(y) + margin_y)
+    # Use fixed ranges if provided, otherwise calculate dynamically
+    if x_range is not None and y_range is not None:
+        x_min, x_max = x_range
+        y_min, y_max = y_range
     else:
-        # Default ranges when no target
-        x_max = 1200.0  # meters
-        y_max = 600.0   # meters
-        
-        # Still consider trajectory extent
-        if len(x) > 0 and len(y) > 0:
-            x_max = max(x_max, np.max(x) + margin_x)
-            y_max = max(y_max, np.max(y) + margin_y)
+        # Calculate axis ranges based on target location + margin
+        # If target is specified, use it to set the scale; otherwise use defaults
+        margin_x = 100.0  # meters margin
+        margin_y = 50.0   # meters margin
+        x_min = 0.0
+        y_min = 0.0
+
+        if target_x is not None and target_y is not None:
+            # Calculate ranges to include target with margin
+            # Always include launch point (0, 0) and target (including its diameter)
+            target_radius = target_diameter / 2.0
+            x_max = max(target_x + target_radius + margin_x, margin_x, 200.0)  # At least 200m wide
+            y_max = max(target_y + target_radius + margin_y, margin_y, 100.0)  # At least 100m tall
+            
+            # Also consider trajectory extent
+            if len(x) > 0 and len(y) > 0:
+                x_max = max(x_max, np.max(x) + margin_x)
+                y_max = max(y_max, np.max(y) + margin_y)
+        else:
+            # Default ranges when no target
+            x_max = 1200.0  # meters
+            y_max = 600.0   # meters
+            
+            # Still consider trajectory extent
+            if len(x) > 0 and len(y) > 0:
+                x_max = max(x_max, np.max(x) + margin_x)
+                y_max = max(y_max, np.max(y) + margin_y)
 
     # Add target circle shape if target is specified
     shapes = []
@@ -206,7 +238,7 @@ def create_trajectory_plot(
             zeroline=True,
             zerolinecolor="black",
             zerolinewidth=2,
-            range=[0, x_max],
+            range=[x_min, x_max],
             fixedrange=True,  # Prevent zoom/pan
         ),
         yaxis=dict(
@@ -216,7 +248,7 @@ def create_trajectory_plot(
             zeroline=True,
             zerolinecolor="black",
             zerolinewidth=2,
-            range=[0, y_max],
+            range=[y_min, y_max],
             fixedrange=True,  # Prevent zoom/pan
         ),
         hovermode="closest",
