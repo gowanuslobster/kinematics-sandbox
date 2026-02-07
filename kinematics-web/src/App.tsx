@@ -1,98 +1,6 @@
 import { useMemo, useRef, useState } from "react";
+import { calculateTrajectory, EARTH_DRAG, type TrajectoryPoint } from "./physics";
 import { TrajectoryChart } from "./TrajectoryChart";
-
-const DT = 0.01;
-const MAX_STEPS = 10_000;
-const V_MIN = 1e-6;
-const EARTH_DRAG = 0.0022;
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-/** Analytical vacuum trajectory: x = v0x*t, y = v0y*t - 0.5*g*t^2. Returns points until landing (y=0). */
-function analyticalTrajectory(
-  v0: number,
-  angleDeg: number,
-  g: number,
-  numPoints = 200,
-): Point[] {
-  if (v0 <= 0 || g <= 0) return [{ x: 0, y: 0 }];
-  const theta = (angleDeg * Math.PI) / 180;
-  const v0x = v0 * Math.cos(theta);
-  const v0y = v0 * Math.sin(theta);
-  if (v0y <= 0) return [{ x: 0, y: 0 }];
-  const tFlight = (2 * v0y) / g;
-  const points: Point[] = [];
-  for (let i = 0; i <= numPoints; i++) {
-    const t = (i / numPoints) * tFlight;
-    const x = v0x * t;
-    const y = v0y * t - 0.5 * g * t * t;
-    points.push({ x, y });
-  }
-  return points;
-}
-
-/** Symplectic Euler-Cromer with quadratic drag F_d = -cd * v * v_vector. Stops when y<0 (with interpolated landing) or v negligible. */
-function trajectoryWithDrag(
-  v0: number,
-  angleDeg: number,
-  g: number,
-  cd: number,
-  targetX: number,
-  targetY: number,
-  targetRadius: number,
-): { points: Point[]; hit: boolean } {
-  const theta = (angleDeg * Math.PI) / 180;
-  const points: Point[] = [];
-  let x = 0;
-  let y = 0;
-  let vx = v0 * Math.cos(theta);
-  let vy = v0 * Math.sin(theta);
-
-  for (let step = 0; step < MAX_STEPS; step++) {
-    points.push({ x, y });
-
-    if (Math.hypot(x - targetX, y - targetY) <= targetRadius) {
-      return { points, hit: true };
-    }
-
-    const v = Math.hypot(vx, vy);
-    if (v < V_MIN) break;
-
-    const ax = -cd * v * vx;
-    const ay = -g - cd * v * vy;
-
-    vx += ax * DT;
-    vy += ay * DT;
-    const xNext = x + vx * DT;
-    const yNext = y + vy * DT;
-
-    if (yNext < 0) {
-      const tFrac = -y / (yNext - y);
-      const xLanding = x + (xNext - x) * tFrac;
-      points.push({ x: xLanding, y: 0 });
-      return { points, hit: false };
-    }
-
-    x = xNext;
-    y = yNext;
-  }
-  return { points, hit: false };
-}
-
-function vacuumMetrics(v0: number, angleDeg: number, g: number) {
-  if (g <= 0) return { timeOfFlight: 0, maxHeight: 0, range: 0 };
-  const theta = (angleDeg * Math.PI) / 180;
-  const v0x = v0 * Math.cos(theta);
-  const v0y = v0 * Math.sin(theta);
-  if (v0y <= 0) return { timeOfFlight: 0, maxHeight: 0, range: 0 };
-  const timeOfFlight = (2 * v0y) / g;
-  const maxHeight = (v0y * v0y) / (2 * g);
-  const range = v0x * timeOfFlight;
-  return { timeOfFlight, maxHeight, range };
-}
 
 const sliderStyle = {
   display: "flex",
@@ -162,70 +70,16 @@ function App() {
     ],
   );
 
-  const { points, hit, vacuumPath, metrics } = useMemo(() => {
-    const effectiveG = Math.max(gravity, 0.1);
-    const vacuum = vacuumMetrics(initialVelocity, launchAngle, effectiveG);
-
-    if (dragCoefficient === 0) {
-      const pts = analyticalTrajectory(
-        initialVelocity,
-        launchAngle,
-        effectiveG,
-        300,
-      );
-      const hitCheck =
-        pts.length > 0 &&
-        pts.some(
-          (p) => Math.hypot(p.x - targetX, p.y - targetY) <= targetRadius,
-        );
-      const rangeActual = pts.length > 0 ? pts[pts.length - 1].x : 0;
-      return {
-        points: pts,
-        hit: hitCheck,
-        vacuumPath: null as Point[] | null,
-        metrics: {
-          timeVacuum: vacuum.timeOfFlight,
-          timeActual: vacuum.timeOfFlight,
-          maxHeightVacuum: vacuum.maxHeight,
-          maxHeightActual: vacuum.maxHeight,
-          rangeVacuum: vacuum.range,
-          rangeActual,
-        },
-      };
-    }
-
-    const { points: pts, hit: hitResult } = trajectoryWithDrag(
+  const simulationResult = useMemo(() => {
+    return calculateTrajectory({
       initialVelocity,
-      launchAngle,
-      effectiveG,
+      launchAngleDeg: launchAngle,
+      gravity,
       dragCoefficient,
       targetX,
       targetY,
       targetRadius,
-    );
-    const vacuumPts = analyticalTrajectory(
-      initialVelocity,
-      launchAngle,
-      effectiveG,
-      300,
-    );
-    const timeActual = (pts.length - 1) * DT;
-    const rangeActual = pts.length > 0 ? pts[pts.length - 1].x : 0;
-    const maxHeightActual = Math.max(0, ...pts.map((p) => p.y));
-
-    return {
-      points: pts,
-      hit: hitResult,
-      vacuumPath: vacuumPts,
-      metrics: {
-        timeVacuum: vacuum.timeOfFlight,
-        timeActual,
-        maxHeightVacuum: vacuum.maxHeight,
-        maxHeightActual,
-        rangeVacuum: vacuum.range,
-        rangeActual,
-      },
-    };
+    });
   }, [
     initialVelocity,
     launchAngle,
@@ -236,7 +90,9 @@ function App() {
     targetRadius,
   ]);
 
-  const prevRef = useRef<{ params: string; points: Point[] } | null>(null);
+  const { points, hit, vacuumPath, timeOfFlightVacuum, timeOfFlightActual, maxHeightVacuum, maxHeightActual, rangeVacuum, rangeActual } = simulationResult;
+
+  const prevRef = useRef<{ params: string; points: TrajectoryPoint[] } | null>(null);
   const ghostPath =
     prevRef.current && prevRef.current.params !== currentParams
       ? prevRef.current.points
@@ -572,34 +428,34 @@ function App() {
             {dragCoefficient > 0 ? (
               <>
                 <span>
-                  <strong>Time of flight:</strong> {metrics.timeActual.toFixed(2)} s
+                  <strong>Time of flight:</strong> {timeOfFlightActual.toFixed(2)} s
                   <span style={{ color: "#6b7280" }}>
-                    {" "}(vacuum: {metrics.timeVacuum.toFixed(2)} s)
+                    {" "}(vacuum: {timeOfFlightVacuum.toFixed(2)} s)
                   </span>
                 </span>
                 <span>
-                  <strong>Max height:</strong> {metrics.maxHeightActual.toFixed(2)} m
+                  <strong>Max height:</strong> {maxHeightActual.toFixed(2)} m
                   <span style={{ color: "#6b7280" }}>
-                    {" "}(vacuum: {metrics.maxHeightVacuum.toFixed(2)} m)
+                    {" "}(vacuum: {maxHeightVacuum.toFixed(2)} m)
                   </span>
                 </span>
                 <span>
-                  <strong>Range:</strong> {metrics.rangeActual.toFixed(2)} m
+                  <strong>Range:</strong> {rangeActual.toFixed(2)} m
                   <span style={{ color: "#6b7280" }}>
-                    {" "}(vacuum: {metrics.rangeVacuum.toFixed(2)} m)
+                    {" "}(vacuum: {rangeVacuum.toFixed(2)} m)
                   </span>
                 </span>
               </>
             ) : (
               <>
                 <span>
-                  <strong>Time of flight:</strong> {metrics.timeVacuum.toFixed(2)} s
+                  <strong>Time of flight:</strong> {timeOfFlightVacuum.toFixed(2)} s
                 </span>
                 <span>
-                  <strong>Max height:</strong> {metrics.maxHeightVacuum.toFixed(2)} m
+                  <strong>Max height:</strong> {maxHeightVacuum.toFixed(2)} m
                 </span>
                 <span>
-                  <strong>Range:</strong> {metrics.rangeVacuum.toFixed(2)} m
+                  <strong>Range:</strong> {rangeVacuum.toFixed(2)} m
                 </span>
               </>
             )}
