@@ -8,6 +8,16 @@ const DT = 0.01;
 const MAX_STEPS = 10_000;
 const V_MIN = 1e-6;
 
+/** Gravity below this is treated as zero (floating-point safety). */
+const G_EPSILON = 1e-10;
+
+/** Max time (s) for zero-gravity straight-line trajectory sampling. */
+const ZERO_G_MAX_TIME = 1000;
+
+function isZeroG(g: number): boolean {
+  return g < G_EPSILON;
+}
+
 /** Reference drag coefficient for Earth's atmosphere (kg/m) — e.g. 10 cm diameter, 1 kg sphere at STP. */
 export const EARTH_DRAG = 0.0022;
 
@@ -60,16 +70,26 @@ function toRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
 
-/** Vacuum (analytic) trajectory: x = v0x*t, y = v0y*t - 0.5*g*t². */
+/** Vacuum (analytic) trajectory: with g > 0 uses parabola; with g ≈ 0 uses straight line x = v0x*t, y = v0y*t. */
 function analyticalTrajectory(
   v0: number,
   angleDeg: number,
   g: number,
   numPoints: number,
 ): TrajectoryPoint[] {
-  if (v0 <= 0 || g <= 0) return [{ x: 0, y: 0 }];
+  if (v0 <= 0) return [{ x: 0, y: 0 }];
   const v0x = v0 * Math.cos(toRad(angleDeg));
   const v0y = v0 * Math.sin(toRad(angleDeg));
+
+  if (isZeroG(g)) {
+    const points: TrajectoryPoint[] = [];
+    for (let i = 0; i <= numPoints; i++) {
+      const t = (i / numPoints) * ZERO_G_MAX_TIME;
+      points.push({ x: v0x * t, y: v0y * t });
+    }
+    return points;
+  }
+
   if (v0y <= 0) return [{ x: 0, y: 0 }];
   const tFlight = (2 * v0y) / g;
   const points: TrajectoryPoint[] = [];
@@ -83,9 +103,9 @@ function analyticalTrajectory(
   return points;
 }
 
-/** Vacuum metrics (time of flight, max height, range). */
+/** Vacuum metrics (time of flight, max height, range). With g ≈ 0 returns 0 (no finite time of flight or max height). */
 function vacuumMetrics(v0: number, angleDeg: number, g: number) {
-  if (g <= 0) return { timeOfFlight: 0, maxHeight: 0, range: 0 };
+  if (isZeroG(g) || g <= 0) return { timeOfFlight: 0, maxHeight: 0, range: 0 };
   const v0x = v0 * Math.cos(toRad(angleDeg));
   const v0y = v0 * Math.sin(toRad(angleDeg));
   if (v0y <= 0) return { timeOfFlight: 0, maxHeight: 0, range: 0 };
@@ -103,7 +123,7 @@ function vacuumMetrics(v0: number, angleDeg: number, g: number) {
  */
 function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint[]; hit: boolean } {
   const { initialVelocity, launchAngleDeg, gravity, dragCoefficient, targetX, targetY, targetRadius } = params;
-  const g = Math.max(gravity, 0.1);
+  const g = isZeroG(gravity) ? 0 : Math.max(gravity, 0.1);
   const cd = dragCoefficient;
   const points: TrajectoryPoint[] = [];
   let x = 0;
@@ -149,7 +169,7 @@ function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint
  * One-way: params in → result out; no side effects.
  */
 export function calculateTrajectory(params: SimulationParams): SimulationResult {
-  const g = Math.max(params.gravity, 0.1);
+  const g = isZeroG(params.gravity) ? 0 : Math.max(params.gravity, 0.1);
   const vacuum = vacuumMetrics(params.initialVelocity, params.launchAngleDeg, g);
 
   if (params.dragCoefficient === 0) {

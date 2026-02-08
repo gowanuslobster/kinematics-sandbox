@@ -1,6 +1,11 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { calculateTrajectory, EARTH_DRAG, type TrajectoryPoint } from "./physics";
 import { TrajectoryChart } from "./TrajectoryChart";
+
+type Mode = "live" | "challenge";
+
+const ANIMATION_INTERVAL_MS = 16;
+const ANIMATION_POINTS_PER_FRAME = 2;
 
 const sliderStyle = {
   display: "flex",
@@ -33,6 +38,7 @@ const maxInputStyle = {
 } as const;
 
 function App() {
+  const [mode, setMode] = useState<Mode>("live");
   const [initialVelocity, setInitialVelocity] = useState(50);
   const [velocityMax, setVelocityMax] = useState(100);
   const [launchAngle, setLaunchAngle] = useState(45);
@@ -46,7 +52,36 @@ function App() {
   const [xAxisMax, setXAxisMax] = useState(100);
   const [yAxisMax, setYAxisMax] = useState(50);
 
+  /** Challenge mode: shot data and how many points to show (animation). null = not fired yet. */
+  const [challengeShot, setChallengeShot] = useState<{
+    points: TrajectoryPoint[];
+    hit: boolean;
+    visibleCount: number;
+  } | null>(null);
+
   const targetRadius = targetDiameter / 2;
+
+  const isChallenge = mode === "challenge";
+  const isAnimating = isChallenge && challengeShot != null && challengeShot.visibleCount < challengeShot.points.length;
+  const challengeComplete = isChallenge && challengeShot != null && challengeShot.visibleCount >= challengeShot.points.length;
+
+  useEffect(() => {
+    if (!isChallenge) setChallengeShot(null);
+  }, [isChallenge]);
+
+  useEffect(() => {
+    if (!challengeShot || challengeShot.visibleCount >= challengeShot.points.length) return;
+    const id = setInterval(() => {
+      setChallengeShot((prev) => {
+        if (!prev || prev.visibleCount >= prev.points.length) return prev;
+        return {
+          ...prev,
+          visibleCount: Math.min(prev.visibleCount + ANIMATION_POINTS_PER_FRAME, prev.points.length),
+        };
+      });
+    }, ANIMATION_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [challengeShot?.visibleCount, challengeShot?.points.length]);
 
   const currentParams = useMemo(
     () =>
@@ -92,6 +127,14 @@ function App() {
 
   const { points, hit, vacuumPath, timeOfFlightVacuum, timeOfFlightActual, maxHeightVacuum, maxHeightActual, rangeVacuum, rangeActual } = simulationResult;
 
+  const visiblePoints: TrajectoryPoint[] = useMemo(() => {
+    if (mode === "live") return points;
+    if (!challengeShot) return [];
+    return challengeShot.points.slice(0, challengeShot.visibleCount);
+  }, [mode, challengeShot, points]);
+
+  const displayHit = mode === "live" ? hit : (challengeComplete && challengeShot ? challengeShot.hit : false);
+
   const prevRef = useRef<{ params: string; points: TrajectoryPoint[] } | null>(null);
   const ghostPath =
     prevRef.current && prevRef.current.params !== currentParams
@@ -100,6 +143,15 @@ function App() {
   if (prevRef.current?.params !== currentParams) {
     prevRef.current = { params: currentParams, points: [...points] };
   }
+
+  const handleFire = () => {
+    if (mode !== "challenge") return;
+    setChallengeShot({
+      points: [...points],
+      hit,
+      visibleCount: 0,
+    });
+  };
 
   const hitHint = useMemo(() => {
     if (hit || points.length === 0) return null;
@@ -123,25 +175,93 @@ function App() {
     <div
       style={{
         display: "flex",
-        flexDirection: "row",
+        flexDirection: "column",
         width: "100vw",
         minHeight: "100vh",
         overflow: "hidden",
       }}
     >
-      <aside
+      <div
         style={{
           flexShrink: 0,
-          width: 240,
-          padding: "1.25rem 1rem",
-          background: "#f9fafb",
-          borderRight: "1px solid #e5e7eb",
           display: "flex",
-          flexDirection: "column",
-          gap: "1.5rem",
-          overflowY: "auto",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "0.5rem",
+          padding: "0.5rem 1rem",
+          background: "#e5e7eb",
+          borderBottom: "1px solid #d1d5db",
         }}
       >
+        <span style={{ fontSize: "0.875rem", fontWeight: 500 }}>Mode:</span>
+        <button
+          type="button"
+          onClick={() => setMode("live")}
+          style={{
+            padding: "0.35rem 0.75rem",
+            fontSize: "0.8125rem",
+            fontWeight: mode === "live" ? 600 : 400,
+            background: mode === "live" ? "#2563eb" : "#f3f4f6",
+            color: mode === "live" ? "#fff" : "#374151",
+            border: "1px solid #d1d5db",
+            borderRadius: 6,
+            cursor: "pointer",
+          }}
+        >
+          Live Mode
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("challenge")}
+          style={{
+            padding: "0.35rem 0.75rem",
+            fontSize: "0.8125rem",
+            fontWeight: mode === "challenge" ? 600 : 400,
+            background: mode === "challenge" ? "#2563eb" : "#f3f4f6",
+            color: mode === "challenge" ? "#fff" : "#374151",
+            border: "1px solid #d1d5db",
+            borderRadius: 6,
+            cursor: "pointer",
+          }}
+        >
+          Challenge Mode
+        </button>
+      </div>
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+        <aside
+          style={{
+            flexShrink: 0,
+            width: 240,
+            padding: "1.25rem 1rem",
+            background: "#f9fafb",
+            borderRight: "1px solid #e5e7eb",
+            display: "flex",
+            flexDirection: "column",
+            gap: "1.5rem",
+            overflowY: "auto",
+          }}
+        >
+          {isChallenge && (
+            <div style={sliderStyle}>
+              <button
+                type="button"
+                onClick={handleFire}
+                disabled={isAnimating}
+                style={{
+                  padding: "0.5rem 1rem",
+                  fontSize: "1rem",
+                  fontWeight: 600,
+                  background: isAnimating ? "#9ca3af" : "#dc2626",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: isAnimating ? "not-allowed" : "pointer",
+                }}
+              >
+                {isAnimating ? "Firing…" : "Fire!"}
+              </button>
+            </div>
+          )}
         <div style={sliderStyle}>
           <span style={labelStyle}>Initial Velocity</span>
           <span style={valueStyle}>{initialVelocity} m/s</span>
@@ -392,15 +512,15 @@ function App() {
           }}
         >
           <TrajectoryChart
-            points={points}
+            points={visiblePoints}
             xRange={[0, xAxisMax]}
             yRange={[0, yAxisMax]}
             targetX={targetX}
             targetY={targetY}
             targetSize={targetRadius}
-            hit={hit}
-            ghostPath={ghostPath ?? undefined}
-            vacuumPath={vacuumPath ?? undefined}
+            hit={displayHit}
+            ghostPath={mode === "live" ? (ghostPath ?? undefined) : undefined}
+            vacuumPath={mode === "live" ? (vacuumPath ?? undefined) : undefined}
           />
         </div>
         <div
@@ -411,11 +531,27 @@ function App() {
             minHeight: 0,
           }}
         >
-          {hit ? (
-            <div style={{ color: "#16a34a", fontWeight: 600 }}>🎯 Target hit!</div>
-          ) : hitHint ? (
-            <div style={{ color: "#b45309", fontSize: "0.875rem" }}>💡 {hitHint}</div>
-          ) : null}
+          {mode === "live" && (
+            <>
+              {hit ? (
+                <div style={{ color: "#16a34a", fontWeight: 600 }}>🎯 Target hit!</div>
+              ) : hitHint ? (
+                <div style={{ color: "#b45309", fontSize: "0.875rem" }}>💡 {hitHint}</div>
+              ) : null}
+            </>
+          )}
+          {mode === "challenge" && !challengeShot && (
+            <div style={{ color: "#6b7280", fontSize: "0.875rem" }}>Adjust parameters and press Fire!</div>
+          )}
+          {mode === "challenge" && isAnimating && (
+            <div style={{ color: "#6b7280", fontSize: "0.875rem" }}>Firing…</div>
+          )}
+          {mode === "challenge" && challengeComplete && challengeShot && (
+            <div style={{ color: challengeShot.hit ? "#16a34a" : "#dc2626", fontWeight: 600, fontSize: "1rem" }}>
+              {challengeShot.hit ? "🎯 Hit!" : "Miss"}
+            </div>
+          )}
+          {mode === "live" && (
           <div
             style={{
               display: "flex",
@@ -460,8 +596,10 @@ function App() {
               </>
             )}
           </div>
+          )}
         </div>
       </main>
+      </div>
     </div>
   );
 }
