@@ -1,7 +1,8 @@
 /**
- * Physics engine for 2D projectile motion with optional quadratic air resistance.
- * Drag model: F_d = -C_d * v² * v̂ (magnitude ∝ v², direction opposite to velocity).
- * Uses Symplectic Euler-Cromer integration when drag is present.
+ * Physics engine for 2D projectile motion with advanced ballistics.
+ * - Drag: F_d = -(1/2) ρ |v|² C_d A v̂
+ * - Magnus (lift): F_L perpendicular to v, magnitude ∝ spin × velocity
+ * Uses Symplectic Euler-Cromer integration when air is present.
  */
 
 const DT = 0.01;
@@ -11,6 +12,9 @@ const V_MIN = 1e-6;
 /** Gravity below this is treated as zero (floating-point safety). */
 const G_EPSILON = 1e-10;
 
+/** Air density below this is treated as vacuum (no drag, no Magnus). */
+const RHO_EPSILON = 1e-10;
+
 /** Max time (s) for zero-gravity straight-line trajectory sampling. */
 const ZERO_G_MAX_TIME = 1000;
 
@@ -18,8 +22,23 @@ function isZeroG(g: number): boolean {
   return g < G_EPSILON;
 }
 
-/** Reference drag coefficient for Earth's atmosphere (kg/m) — e.g. 10 cm diameter, 1 kg sphere at STP. */
+function isVacuum(rho: number): boolean {
+  return rho < RHO_EPSILON;
+}
+
+/** Reference drag coefficient for Earth's atmosphere (kg/m) — legacy; use ballistics params when available. */
 export const EARTH_DRAG = 0.0022;
+
+/** Air density at sea level (kg/m³). */
+export const AIR_DENSITY_SEA_LEVEL = 1.225;
+
+/** Ball presets for mass (kg), radius (m), dimensionless C_d. Use with spinRpm and airDensity. */
+export const BALL_PRESETS = {
+  /** Baseball: ~145 g, ~3.7 cm radius, C_d ≈ 0.3. */
+  baseball: { mass: 0.145, radius: 0.037, dragCoefficient: 0.3 },
+  /** Ping pong: ~2.7 g, ~2 cm radius, C_d ≈ 0.5 — low mass gives dramatic Magnus curves. */
+  pingPong: { mass: 0.0027, radius: 0.02, dragCoefficient: 0.5 },
+} as const;
 
 export interface TrajectoryPoint {
   x: number;
@@ -34,7 +53,7 @@ export interface SimulationParams {
   launchAngleDeg: number;
   /** Gravitational acceleration (m/s²). */
   gravity: number;
-  /** Drag coefficient C_d (kg/m). Drag force magnitude = C_d * v². */
+  /** Dimensionless drag coefficient C_d. Used in F_d = -(1/2) ρ C_d A |v|² v̂. */
   dragCoefficient: number;
   /** Target center X (m). */
   targetX: number;
@@ -42,6 +61,14 @@ export interface SimulationParams {
   targetY: number;
   /** Target radius for hit detection (m). */
   targetRadius: number;
+  /** Ball mass (kg). Default 0.145 (baseball). */
+  mass?: number;
+  /** Ball radius (m). Default 0.037 (baseball). */
+  radius?: number;
+  /** Spin in revolutions per minute (backspin = positive). Default 0. */
+  spinRpm?: number;
+  /** Air density (kg/m³). Use 0 or &lt; 1e-10 for vacuum. Default 1.225. */
+  airDensity?: number;
 }
 
 /** Result of a single trajectory run. */
@@ -116,15 +143,31 @@ function vacuumMetrics(v0: number, angleDeg: number, g: number) {
 }
 
 /**
- * Symplectic Euler-Cromer integration with quadratic drag F_d = -C_d * v² * v̂.
- * Update velocity first, then position using the new velocity:
- *   v_{n+1} = v_n + a_n * dt
- *   x_{n+1} = x_n + v_{n+1} * dt
+ * Advanced ballistics: Symplectic Euler-Cromer with drag and Magnus.
+ * - Drag: F_d = -(1/2) ρ |v|² C_d A v̂  →  -(1/2) ρ C_d A |v| (vx, vy)
+ * - Magnus: F_L ∝ ω × v (backspin = +ω out of page) → F_L = 2 ρ π r³ ω (-vy, vx)
+ * Integration: a = (F_g + F_d + F_L)/m; v = v + a·dt; pos = pos + v·dt
  */
 function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint[]; hit: boolean } {
-  const { initialVelocity, launchAngleDeg, gravity, dragCoefficient, targetX, targetY, targetRadius } = params;
+  const {
+    initialVelocity,
+    launchAngleDeg,
+    gravity,
+    dragCoefficient,
+    targetX,
+    targetY,
+    targetRadius,
+  } = params;
   const g = isZeroG(gravity) ? 0 : Math.max(gravity, 0.1);
-  const cd = dragCoefficient;
+  const m = Math.max(params.mass ?? 0.145, 1e-10);
+  const r = Math.max(params.radius ?? 0.037, 1e-10);
+  const rho = params.airDensity ?? AIR_DENSITY_SEA_LEVEL;
+  const cd = Math.max(dragCoefficient, 0);
+  const spinRpm = params.spinRpm ?? 0;
+  const omegaRad = (spinRpm * Math.PI * 2) / 60;
+
+  const A = Math.PI * r * r;
+
   const points: TrajectoryPoint[] = [];
   let x = 0;
   let y = 0;
@@ -141,8 +184,22 @@ function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint
     const v = Math.hypot(vx, vy);
     if (v < V_MIN) break;
 
-    const ax = -cd * v * vx;
-    const ay = -g - cd * v * vy;
+    let Fx = 0;
+    let Fy = -m * g;
+
+    if (rho >= RHO_EPSILON) {
+      const vMag = v;
+      Fx += -0.5 * rho * cd * A * vMag * vx;
+      Fy += -0.5 * rho * cd * A * vMag * vy;
+      if (Math.abs(omegaRad) >= 1e-10) {
+        const magnus = 2 * rho * Math.PI * r * r * r * omegaRad;
+        Fx += -magnus * vy;
+        Fy += magnus * vx;
+      }
+    }
+
+    const ax = Fx / m;
+    const ay = Fy / m;
 
     vx += ax * DT;
     vy += ay * DT;
@@ -167,12 +224,15 @@ function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint
 /**
  * Pure function: compute trajectory and derived metrics from simulation parameters.
  * One-way: params in → result out; no side effects.
+ * Uses vacuum (analytic) when air density is effectively zero; otherwise uses advanced ballistics.
  */
 export function calculateTrajectory(params: SimulationParams): SimulationResult {
   const g = isZeroG(params.gravity) ? 0 : Math.max(params.gravity, 0.1);
   const vacuum = vacuumMetrics(params.initialVelocity, params.launchAngleDeg, g);
+  const rho = params.airDensity ?? AIR_DENSITY_SEA_LEVEL;
+  const useVacuum = isVacuum(rho) || (params.airDensity === undefined && params.dragCoefficient === 0);
 
-  if (params.dragCoefficient === 0) {
+  if (useVacuum) {
     const points = analyticalTrajectory(
       params.initialVelocity,
       params.launchAngleDeg,

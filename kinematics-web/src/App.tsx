@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { calculateTrajectory, EARTH_DRAG, type TrajectoryPoint } from "./physics";
+import {
+  AIR_DENSITY_SEA_LEVEL,
+  BALL_PRESETS,
+  calculateTrajectory,
+  type TrajectoryPoint,
+} from "./physics";
 import { TrajectoryChart } from "./TrajectoryChart";
 
 type Mode = "live" | "challenge";
@@ -44,13 +49,17 @@ function App() {
   const [launchAngle, setLaunchAngle] = useState(45);
   const [gravity, setGravity] = useState(9.81);
   const [gravityMax, setGravityMax] = useState(25);
-  const [dragCoefficient, setDragCoefficient] = useState(EARTH_DRAG);
-  const [dragMax, setDragMax] = useState(EARTH_DRAG * 10);
+  const [dragCoefficient, setDragCoefficient] = useState(0.5);
+  const [dragMax, setDragMax] = useState(1);
+  const [mass, setMass] = useState<number>(BALL_PRESETS.baseball.mass);
+  const [radius, setRadius] = useState<number>(BALL_PRESETS.baseball.radius);
+  const [spinRpm, setSpinRpm] = useState(0);
+  const [airDensity, setAirDensity] = useState(AIR_DENSITY_SEA_LEVEL);
   const [targetX, setTargetX] = useState(100);
   const [targetY, setTargetY] = useState(25);
   const [targetDiameter, setTargetDiameter] = useState(3);
-  const [xAxisMax, setXAxisMax] = useState(100);
-  const [yAxisMax, setYAxisMax] = useState(50);
+  const [xAxisMax, setXAxisMax] = useState(120);
+  const [yAxisMax, setYAxisMax] = useState(70);
 
   /** Challenge mode: shot data and how many points to show (animation). null = not fired yet. */
   const [challengeShot, setChallengeShot] = useState<{
@@ -90,6 +99,10 @@ function App() {
         launchAngle,
         gravity,
         dragCoefficient,
+        mass,
+        radius,
+        spinRpm,
+        airDensity,
         targetX,
         targetY,
         targetDiameter,
@@ -99,6 +112,10 @@ function App() {
       launchAngle,
       gravity,
       dragCoefficient,
+      mass,
+      radius,
+      spinRpm,
+      airDensity,
       targetX,
       targetY,
       targetDiameter,
@@ -114,6 +131,10 @@ function App() {
       targetX,
       targetY,
       targetRadius,
+      mass,
+      radius,
+      spinRpm,
+      airDensity,
     });
   }, [
     initialVelocity,
@@ -123,6 +144,10 @@ function App() {
     targetX,
     targetY,
     targetRadius,
+    mass,
+    radius,
+    spinRpm,
+    airDensity,
   ]);
 
   const { points, hit, vacuumPath, timeOfFlightVacuum, timeOfFlightActual, maxHeightVacuum, maxHeightActual, rangeVacuum, rangeActual } = simulationResult;
@@ -349,17 +374,17 @@ function App() {
           </span>
         </div>
         <div style={sliderStyle}>
-          <span style={labelStyle}>Air Resistance (C_d)</span>
-          <span style={valueStyle}>{dragCoefficient.toFixed(4)} kg/m</span>
+          <span style={labelStyle}>Drag coefficient (C_d)</span>
+          <span style={valueStyle}>{dragCoefficient.toFixed(2)}</span>
           <input
             type="range"
             min={0}
-            max={Math.max(0.0001, dragMax)}
-            step={0.0001}
-            value={Math.min(dragCoefficient, Math.max(0.0001, dragMax))}
+            max={Math.max(0.01, dragMax)}
+            step={0.01}
+            value={Math.min(dragCoefficient, Math.max(0.01, dragMax))}
             onChange={(e) => setDragCoefficient(Number(e.target.value))}
             style={inputStyle}
-            aria-label="Drag coefficient"
+            aria-label="Drag coefficient dimensionless"
           />
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "2px" }}>
             <label style={{ fontSize: "0.7rem", color: "#6b7280", marginRight: "4px", alignSelf: "center" }}>
@@ -367,22 +392,148 @@ function App() {
             </label>
             <input
               type="number"
-              min={0.0001}
-              step={0.0001}
+              min={0.01}
+              max={2}
+              step={0.01}
               value={dragMax}
               onChange={(e) => {
                 const n = Number(e.target.value);
-                if (!Number.isNaN(n) && n >= 0.0001) {
+                if (!Number.isNaN(n) && n >= 0.01 && n <= 2) {
                   setDragMax(n);
                   if (dragCoefficient > n) setDragCoefficient(n);
                 }
               }}
-              style={{ ...maxInputStyle, width: "3.5rem" }}
-              aria-label="Air resistance slider maximum"
+              style={maxInputStyle}
+              aria-label="Drag coefficient maximum"
             />
           </div>
+          <span style={{ ...valueStyle, fontSize: "0.7rem" }}>Typical sphere ≈ 0.5</span>
+        </div>
+        <div
+          style={{
+            ...sliderStyle,
+            marginRight: "0.75rem",
+            marginLeft: "0.25rem",
+          }}
+        >
+          <span style={labelStyle}>Ball preset</span>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => {
+                setMass(BALL_PRESETS.baseball.mass);
+                setRadius(BALL_PRESETS.baseball.radius);
+                setDragCoefficient(BALL_PRESETS.baseball.dragCoefficient);
+              }}
+              style={{
+                padding: "0.35rem 0.5rem",
+                fontSize: "0.75rem",
+                background: "#e5e7eb",
+                border: "1px solid #d1d5db",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              Baseball
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMass(BALL_PRESETS.pingPong.mass);
+                setRadius(BALL_PRESETS.pingPong.radius);
+                setDragCoefficient(BALL_PRESETS.pingPong.dragCoefficient);
+              }}
+              style={{
+                padding: "0.35rem 0.5rem",
+                fontSize: "0.75rem",
+                background: "#e5e7eb",
+                border: "1px solid #d1d5db",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              Ping pong
+            </button>
+          </div>
+        </div>
+        <div
+          style={{
+            ...sliderStyle,
+            marginRight: "0.75rem",
+            marginLeft: "0.25rem",
+          }}
+        >
+          <span style={labelStyle}>Mass (kg)</span>
+          <input
+            type="number"
+            min={0.0001}
+            step="any"
+            value={mass}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isNaN(n) && n > 0) setMass(n);
+            }}
+            style={{ ...inputStyle, padding: "0.35rem 0.5rem" }}
+            aria-label="Ball mass"
+          />
+        </div>
+        <div
+          style={{
+            ...sliderStyle,
+            marginRight: "0.75rem",
+            marginLeft: "0.25rem",
+          }}
+        >
+          <span style={labelStyle}>Radius (m)</span>
+          <input
+            type="number"
+            min={0.001}
+            step="any"
+            value={radius}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isNaN(n) && n > 0) setRadius(n);
+            }}
+            style={{ ...inputStyle, padding: "0.35rem 0.5rem" }}
+            aria-label="Ball radius"
+          />
+        </div>
+        <div style={sliderStyle}>
+          <span style={labelStyle}>Spin (RPM)</span>
+          <span style={valueStyle}>{spinRpm} (backspin +)</span>
+          <input
+            type="range"
+            min={-3000}
+            max={3000}
+            step={50}
+            value={spinRpm}
+            onChange={(e) => setSpinRpm(Number(e.target.value))}
+            style={inputStyle}
+            aria-label="Spin RPM"
+          />
+        </div>
+        <div
+          style={{
+            ...sliderStyle,
+            marginRight: "0.75rem",
+            marginLeft: "0.25rem",
+          }}
+        >
+          <span style={labelStyle}>Air density (kg/m³)</span>
+          <input
+            type="number"
+            min={0}
+            step="any"
+            value={airDensity}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isNaN(n) && n >= 0) setAirDensity(n);
+            }}
+            style={{ ...inputStyle, padding: "0.35rem 0.5rem" }}
+            aria-label="Air density"
+          />
           <span style={{ ...valueStyle, fontSize: "0.7rem" }}>
-            Moon 0 · Mars 0.00004 · Jupiter 0.0003 · Saturn 0.0004 · Earth {EARTH_DRAG.toFixed(4)} kg/m
+            Sea level ≈ {AIR_DENSITY_SEA_LEVEL.toFixed(2)}; 0 = vacuum
           </span>
         </div>
         <div
@@ -505,8 +656,8 @@ function App() {
       >
         <div
           style={{
-            flex: 4,
-            minHeight: 320,
+            flex: 3,
+            minHeight: 280,
             display: "flex",
             flexDirection: "column",
           }}
