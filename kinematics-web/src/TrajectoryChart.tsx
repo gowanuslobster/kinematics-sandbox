@@ -22,7 +22,9 @@ export interface TrajectoryChartProps {
   targetY?: number;
   targetSize?: number;
   hit?: boolean;
-  ghostPath?: TrajectoryPoint[];
+  pinnedPath?: TrajectoryPoint[];
+  pinnedSettings?: string;
+  currentSettings?: string;
   vacuumPath?: TrajectoryPoint[];
 }
 
@@ -34,25 +36,34 @@ export function TrajectoryChart({
   targetY,
   targetSize = 5,
   hit = false,
-  ghostPath,
+  pinnedPath,
+  pinnedSettings,
+  currentSettings,
   vacuumPath,
 }: TrajectoryChartProps) {
   const x = points.map((p) => p.x);
   const y = points.map((p) => p.y);
 
   const targetColor = hit ? "#16a34a" : "#dc2626";
+  const buildHoverTemplate = (label: string, settings?: string) => {
+    const settingsBlock = settings != null && settings.length > 0
+      ? `<br><br><b>Settings</b><br>${settings}`
+      : "";
+    return `<b>${label}</b><br>x: %{x:.2f} m<br>y: %{y:.2f} m${settingsBlock}<extra></extra>`;
+  };
 
   const data: object[] = [];
 
-  if (ghostPath != null && ghostPath.length > 0) {
+  if (pinnedPath != null && pinnedPath.length > 0) {
     data.push({
-      x: ghostPath.map((p) => p.x),
-      y: ghostPath.map((p) => p.y),
+      x: pinnedPath.map((p) => p.x),
+      y: pinnedPath.map((p) => p.y),
       type: "scatter",
       mode: "lines",
       line: { color: "#9ca3af", width: 2, dash: "dot" },
       opacity: 0.6,
-      name: "Previous path",
+      name: "Pinned trajectory",
+      hovertemplate: buildHoverTemplate("Pinned trajectory", pinnedSettings),
     });
   }
 
@@ -73,7 +84,8 @@ export function TrajectoryChart({
     type: "scatter",
     mode: "lines",
     line: { shape: "spline" },
-    name: "Trajectory",
+    name: "Current trajectory",
+    hovertemplate: buildHoverTemplate("Current trajectory", currentSettings),
   });
 
   const shapes =
@@ -108,7 +120,7 @@ export function TrajectoryChart({
             showgrid: true,
             range: yRange,
           },
-          showlegend: ghostPath != null || vacuumPath != null,
+          showlegend: pinnedPath != null || vacuumPath != null,
           legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.8)" },
           shapes,
         }}

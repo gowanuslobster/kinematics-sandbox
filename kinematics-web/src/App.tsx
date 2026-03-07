@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AIR_DENSITY_SEA_LEVEL,
   BALL_PRESETS,
@@ -60,6 +60,10 @@ function App() {
   const [targetDiameter, setTargetDiameter] = useState(3);
   const [xAxisMax, setXAxisMax] = useState(120);
   const [yAxisMax, setYAxisMax] = useState(70);
+  const [pinnedTrajectory, setPinnedTrajectory] = useState<{
+    points: TrajectoryPoint[];
+    settings: string;
+  } | null>(null);
 
   /** Challenge mode: shot data and how many points to show (animation). null = not fired yet. */
   const [challengeShot, setChallengeShot] = useState<{
@@ -92,36 +96,6 @@ function App() {
     return () => clearInterval(id);
   }, [challengeShot?.visibleCount, challengeShot?.points.length]);
 
-  const currentParams = useMemo(
-    () =>
-      [
-        initialVelocity,
-        launchAngle,
-        gravity,
-        dragCoefficient,
-        mass,
-        radius,
-        spinRpm,
-        airDensity,
-        targetX,
-        targetY,
-        targetDiameter,
-      ].join(","),
-    [
-      initialVelocity,
-      launchAngle,
-      gravity,
-      dragCoefficient,
-      mass,
-      radius,
-      spinRpm,
-      airDensity,
-      targetX,
-      targetY,
-      targetDiameter,
-    ],
-  );
-
   const simulationResult = useMemo(() => {
     return calculateTrajectory({
       initialVelocity,
@@ -152,6 +126,35 @@ function App() {
 
   const { points, hit, vacuumPath, timeOfFlightVacuum, timeOfFlightActual, maxHeightVacuum, maxHeightActual, rangeVacuum, rangeActual } = simulationResult;
 
+  const currentTrajectorySettings = useMemo(
+    () =>
+      [
+        `v₀: ${initialVelocity.toFixed(2)} m/s`,
+        `θ: ${launchAngle.toFixed(1)}°`,
+        `g: ${gravity.toFixed(2)} m/s²`,
+        `C_d: ${dragCoefficient.toFixed(2)}`,
+        `mass: ${mass.toFixed(4)} kg`,
+        `radius: ${radius.toFixed(4)} m`,
+        `spin: ${spinRpm} rpm`,
+        `air density: ${airDensity.toFixed(3)} kg/m³`,
+        `target: (${targetX.toFixed(1)}, ${targetY.toFixed(1)}) m`,
+        `target diameter: ${targetDiameter.toFixed(1)} m`,
+      ].join("<br>"),
+    [
+      initialVelocity,
+      launchAngle,
+      gravity,
+      dragCoefficient,
+      mass,
+      radius,
+      spinRpm,
+      airDensity,
+      targetX,
+      targetY,
+      targetDiameter,
+    ],
+  );
+
   const visiblePoints: TrajectoryPoint[] = useMemo(() => {
     if (mode === "live") return points;
     if (!challengeShot) return [];
@@ -160,14 +163,16 @@ function App() {
 
   const displayHit = mode === "live" ? hit : (challengeComplete && challengeShot ? challengeShot.hit : false);
 
-  const prevRef = useRef<{ params: string; points: TrajectoryPoint[] } | null>(null);
-  const ghostPath =
-    prevRef.current && prevRef.current.params !== currentParams
-      ? prevRef.current.points
-      : null;
-  if (prevRef.current?.params !== currentParams) {
-    prevRef.current = { params: currentParams, points: [...points] };
-  }
+  const handlePinCurrentTrajectory = () => {
+    setPinnedTrajectory({
+      points: [...points],
+      settings: currentTrajectorySettings,
+    });
+  };
+
+  const handleClearPinnedTrajectory = () => {
+    setPinnedTrajectory(null);
+  };
 
   const handleFire = () => {
     if (mode !== "challenge") return;
@@ -287,6 +292,48 @@ function App() {
               </button>
             </div>
           )}
+        {mode === "live" && (
+          <div style={sliderStyle}>
+            <button
+              type="button"
+              onClick={handlePinCurrentTrajectory}
+              style={{
+                padding: "0.4rem 0.75rem",
+                fontSize: "0.8125rem",
+                fontWeight: 600,
+                background: "#2563eb",
+                color: "#fff",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              📌 Pin Current Trajectory
+            </button>
+            <button
+              type="button"
+              onClick={handleClearPinnedTrajectory}
+              disabled={pinnedTrajectory == null}
+              style={{
+                padding: "0.35rem 0.75rem",
+                fontSize: "0.75rem",
+                fontWeight: 500,
+                background: pinnedTrajectory == null ? "#d1d5db" : "#f3f4f6",
+                color: pinnedTrajectory == null ? "#6b7280" : "#374151",
+                border: "1px solid #d1d5db",
+                borderRadius: 6,
+                cursor: pinnedTrajectory == null ? "not-allowed" : "pointer",
+              }}
+            >
+              Clear pinned trajectory
+            </button>
+            {pinnedTrajectory != null && (
+              <span style={{ ...valueStyle, fontSize: "0.7rem" }}>
+                Pinned trajectory active
+              </span>
+            )}
+          </div>
+        )}
         <div style={sliderStyle}>
           <span style={labelStyle}>Initial Velocity</span>
           <span style={valueStyle}>{initialVelocity} m/s</span>
@@ -670,7 +717,9 @@ function App() {
             targetY={targetY}
             targetSize={targetRadius}
             hit={displayHit}
-            ghostPath={mode === "live" ? (ghostPath ?? undefined) : undefined}
+            pinnedPath={mode === "live" ? (pinnedTrajectory?.points ?? undefined) : undefined}
+            pinnedSettings={mode === "live" ? (pinnedTrajectory?.settings ?? undefined) : undefined}
+            currentSettings={mode === "live" ? currentTrajectorySettings : undefined}
             vacuumPath={mode === "live" ? (vacuumPath ?? undefined) : undefined}
           />
         </div>
