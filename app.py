@@ -165,8 +165,8 @@ if cd > 0:
     if len(x_actual) > 0 and len(y_actual) > 0:
         range_actual = x_actual[-1]
         max_height_actual = np.max(y_actual) if len(y_actual) > 0 else 0
-        # Estimate time of flight from trajectory
-        time_actual = len(x_actual) * 0.01  # Approximate from simulation
+        # Compute time from an undownsampled drag run to avoid chart sampling bias
+        time_actual = projectile.time_of_flight_drag()
     else:
         range_actual = 0
         max_height_actual = 0

@@ -41,7 +41,7 @@ class Projectile:
         float
             Time of flight in seconds
         """
-        if self.v0y <= 0:
+        if self.v0y <= 0 or self.g <= 0:
             return 0.0
         return 2 * self.v0y / self.g
 
@@ -54,7 +54,7 @@ class Projectile:
         float
             Maximum height in meters
         """
-        if self.v0y <= 0:
+        if self.v0y <= 0 or self.g <= 0:
             return 0.0
         return (self.v0y**2) / (2 * self.g)
 
@@ -87,9 +87,10 @@ class Projectile:
         x = self.v0x * t
         y = self.v0y * t - 0.5 * self.g * t**2
 
-        # Set y to 0 for times after landing
+        # Set y to 0 for times after landing when gravity is active
         t_flight = self.time_of_flight()
-        y[t > t_flight] = 0
+        if t_flight > 0:
+            y[t > t_flight] = 0
 
         return x, y
 
@@ -129,6 +130,12 @@ class Projectile:
         tuple[np.ndarray, np.ndarray]
             Tuple of (x positions, y positions) in meters
         """
+        # Zero/negative gravity has no finite landing time in vacuum.
+        # Sample a finite straight-line window to keep outputs stable and plottable.
+        if self.g <= 0:
+            t = np.linspace(0.0, 100.0, num_points)
+            return self.position(t)
+
         t_flight = self.time_of_flight()
         if t_flight <= 0:
             return np.array([0.0]), np.array([0.0])
@@ -236,6 +243,24 @@ class Projectile:
             y_array = y_array[indices]
         
         return x_array, y_array
+
+    def time_of_flight_drag(self) -> float:
+        """
+        Estimate time of flight for the drag simulation in seconds.
+
+        Returns
+        -------
+        float
+            Estimated flight time in seconds.
+        """
+        if self.cd == 0.0:
+            return self.time_of_flight()
+
+        # Request max resolution to avoid downsampling bias.
+        x, _ = self._trajectory_with_drag(num_points=10001)
+        if len(x) <= 1:
+            return 0.0
+        return (len(x) - 1) * 0.01
 
     def trajectory_vacuum(self, num_points: int = 100) -> tuple[np.ndarray, np.ndarray]:
         """
