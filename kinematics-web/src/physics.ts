@@ -8,6 +8,9 @@
 const DT = 0.01;
 const MAX_STEPS = 10_000;
 const V_MIN = 1e-6;
+const MIN_NON_ZERO_GRAVITY = 0.1;
+const DEFAULT_BALL_MASS = 0.145;
+const DEFAULT_BALL_RADIUS = 0.037;
 
 /** Gravity below this is treated as zero (floating-point safety). */
 const G_EPSILON = 1e-10;
@@ -24,6 +27,25 @@ function isZeroG(g: number): boolean {
 
 function isVacuum(rho: number): boolean {
   return rho < RHO_EPSILON;
+}
+
+/** Keep gravity at true zero or a numerically stable positive floor. */
+function normalizeGravity(gravity: number): number {
+  return isZeroG(gravity) ? 0 : Math.max(gravity, MIN_NON_ZERO_GRAVITY);
+}
+
+function velocityComponents(initialVelocity: number, angleDeg: number): { v0x: number; v0y: number } {
+  const angleRad = toRad(angleDeg);
+  return {
+    v0x: initialVelocity * Math.cos(angleRad),
+    v0y: initialVelocity * Math.sin(angleRad),
+  };
+}
+
+/** Drag + atmosphere off means we can use the analytical vacuum model. */
+function shouldUseVacuumModel(airDensity: number | undefined, dragCoefficient: number): boolean {
+  const rho = airDensity ?? AIR_DENSITY_SEA_LEVEL;
+  return isVacuum(rho) || (airDensity === undefined && dragCoefficient === 0);
 }
 
 /** Reference drag coefficient for Earth's atmosphere (kg/m) — legacy; use ballistics params when available. */
@@ -105,8 +127,7 @@ function analyticalTrajectory(
   numPoints: number,
 ): TrajectoryPoint[] {
   if (v0 <= 0) return [{ x: 0, y: 0 }];
-  const v0x = v0 * Math.cos(toRad(angleDeg));
-  const v0y = v0 * Math.sin(toRad(angleDeg));
+  const { v0x, v0y } = velocityComponents(v0, angleDeg);
 
   if (isZeroG(g)) {
     const points: TrajectoryPoint[] = [];
@@ -133,8 +154,7 @@ function analyticalTrajectory(
 /** Vacuum metrics (time of flight, max height, range). With g ≈ 0 returns 0 (no finite time of flight or max height). */
 function vacuumMetrics(v0: number, angleDeg: number, g: number) {
   if (isZeroG(g) || g <= 0) return { timeOfFlight: 0, maxHeight: 0, range: 0 };
-  const v0x = v0 * Math.cos(toRad(angleDeg));
-  const v0y = v0 * Math.sin(toRad(angleDeg));
+  const { v0x, v0y } = velocityComponents(v0, angleDeg);
   if (v0y <= 0) return { timeOfFlight: 0, maxHeight: 0, range: 0 };
   const timeOfFlight = (2 * v0y) / g;
   const maxHeight = (v0y * v0y) / (2 * g);
@@ -158,9 +178,9 @@ function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint
     targetY,
     targetRadius,
   } = params;
-  const g = isZeroG(gravity) ? 0 : Math.max(gravity, 0.1);
-  const m = Math.max(params.mass ?? 0.145, 1e-10);
-  const r = Math.max(params.radius ?? 0.037, 1e-10);
+  const g = normalizeGravity(gravity);
+  const m = Math.max(params.mass ?? DEFAULT_BALL_MASS, 1e-10);
+  const r = Math.max(params.radius ?? DEFAULT_BALL_RADIUS, 1e-10);
   const rho = params.airDensity ?? AIR_DENSITY_SEA_LEVEL;
   const cd = Math.max(dragCoefficient, 0);
   const spinRpm = params.spinRpm ?? 0;
@@ -171,8 +191,7 @@ function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint
   const points: TrajectoryPoint[] = [];
   let x = 0;
   let y = 0;
-  let vx = initialVelocity * Math.cos(toRad(launchAngleDeg));
-  let vy = initialVelocity * Math.sin(toRad(launchAngleDeg));
+  let { v0x: vx, v0y: vy } = velocityComponents(initialVelocity, launchAngleDeg);
 
   for (let step = 0; step < MAX_STEPS; step++) {
     points.push({ x, y });
@@ -227,10 +246,9 @@ function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint
  * Uses vacuum (analytic) when air density is effectively zero; otherwise uses advanced ballistics.
  */
 export function calculateTrajectory(params: SimulationParams): SimulationResult {
-  const g = isZeroG(params.gravity) ? 0 : Math.max(params.gravity, 0.1);
+  const g = normalizeGravity(params.gravity);
   const vacuum = vacuumMetrics(params.initialVelocity, params.launchAngleDeg, g);
-  const rho = params.airDensity ?? AIR_DENSITY_SEA_LEVEL;
-  const useVacuum = isVacuum(rho) || (params.airDensity === undefined && params.dragCoefficient === 0);
+  const useVacuum = shouldUseVacuumModel(params.airDensity, params.dragCoefficient);
 
   if (useVacuum) {
     const points = analyticalTrajectory(
