@@ -1,73 +1,81 @@
-# React + TypeScript + Vite
+# Kinematics Web (React App)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Primary frontend for the Kinematics Sandbox project.
 
-Currently, two official plugins are available:
+This app lets students explore projectile motion with:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- live parameter control
+- challenge mode with shot animation
+- drag + spin + air-density effects
+- target hit feedback
+- pinned trajectory comparison (one pinned trajectory + one current trajectory)
 
-## React Compiler
+## Quick start
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+From the repository root:
 
-## Expanding the ESLint configuration
+1. `cd kinematics-web`
+2. `npm install`
+3. `npm run dev`
+4. Open `http://localhost:5173`
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## First run walkthrough
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+1. Leave the app in **Live Mode**.
+2. Adjust `Initial Velocity`, `Launch Angle`, `Gravity`, and `Drag coefficient`.
+3. Click **Pin Current Trajectory**.
+4. Change launch parameters again and compare the new path to the pinned one.
+5. Hover either trajectory line to inspect the exact settings used for that shot.
+6. Switch to **Challenge Mode** and click **Fire!** to animate an attempt.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Scripts
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- `npm run dev` - start local development server (Vite)
+- `npm run build` - type-check and production build
+- `npm run preview` - preview production build
+- `npm run lint` - run ESLint
+- `npm test` - run unit tests
+- `npm run test:unit` - run unit tests directly
+- `npm run test:unit:watch` - run unit tests in watch mode
+- `npm run storybook` - run Storybook
+- `npm run build-storybook` - build Storybook static site
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Testing
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Unit tests live in `src/**/*.test.ts` and run through `vitest.unit.config.ts`.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Current baseline tests focus on `calculateTrajectory()` and cover:
+
+- vacuum-mode behavior
+- drag-mode behavior
+- zero-gravity stability
+- hit detection
+
+Run tests with:
+
+- `npm test`
+
+## Known caveats
+
+- `npm run build` can fail on pre-existing TypeScript issues in:
+  - `src/stories/Button.tsx`
+  - `src/stories/Header.tsx`
+- `npm run lint` may report pre-existing lint findings unrelated to physics logic changes.
+
+These issues are outside normal runtime usage; `npm run dev` works for local development.
+
+## Code map
+
+- `src/App.tsx` - app state, controls, mode switching, and orchestration
+- `src/physics.ts` - physics simulation and derived metrics
+- `src/TrajectoryChart.tsx` - Plotly rendering and hover display
+- `src/physics.test.ts` - physics unit tests
+- `vitest.unit.config.ts` - standalone unit test config
+
+## Tech stack
+
+- React 19
+- TypeScript
+- Vite
+- Plotly (`react-plotly.js`)
+- Vitest
