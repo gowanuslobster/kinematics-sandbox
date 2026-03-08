@@ -11,7 +11,7 @@ If you are new here, start with the React app.
 
 ---
 
-## Quick start (new users)
+## Quick start
 
 ### 1) Prerequisites
 
@@ -32,7 +32,7 @@ You should see the control panel on the left and the trajectory chart on the rig
 
 ---
 
-## First 10 minutes: play tutorial
+## Intro Tutorial
 
 This is a simple guided flow for first-time users.
 
@@ -119,7 +119,7 @@ This path is maintained for compatibility, but React is the primary experience.
 
 ---
 
-## Developer notes (secondary)
+## Developer notes
 
 ### High-level layout
 
@@ -137,13 +137,3 @@ This path is maintained for compatibility, but React is the primary experience.
 - React build: `cd kinematics-web && npm run build`
 - React lint: `cd kinematics-web && npm run lint`
 - Streamlit dev: `uv run streamlit run app.py --server.headless true`
-
-### Contribution workflow (recommended)
-
-Before starting work:
-
-1. `git fetch origin`
-2. Compare your branch with `origin/main`
-3. Fast-forward/rebase to match `origin/main`
-
-This avoids drift and reduces merge conflicts.
