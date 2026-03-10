@@ -9,9 +9,16 @@ import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import { playwright } from '@vitest/browser-playwright';
 const dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
+const PAGES_BASE_PATH = "/kinematics-sandbox/";
+
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // Keep local dev URLs simple while building with the Pages base path.
+  base: command === "build" ? PAGES_BASE_PATH : "/",
   plugins: [react()],
+  build: {
+    outDir: "out",
+  },
   test: {
     projects: [{
       extends: true,
@@ -35,4 +42,4 @@ export default defineConfig({
       }
     }]
   }
-});
+}));
