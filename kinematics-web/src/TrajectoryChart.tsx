@@ -354,7 +354,7 @@ export function TrajectoryChart({
           zIndex: 5,
         }}
       >
-        <div style={{ fontWeight: 700, marginBottom: "0.25rem", color: "#f9fafb" }}>Data HUD</div>
+        <div style={{ fontWeight: 700, marginBottom: "0.25rem", color: "#f9fafb" }}>Projectile Stats</div>
         {hoveredPoint ? (
           <>
             <div>pos  = ({hoveredPoint.x.toFixed(2)}, {hoveredPoint.y.toFixed(2)}) m</div>
