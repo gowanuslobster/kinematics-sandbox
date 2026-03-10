@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AIR_DENSITY_SEA_LEVEL,
   BALL_PRESETS,
@@ -11,6 +11,9 @@ type Mode = "live" | "challenge";
 
 const ANIMATION_INTERVAL_MS = 16;
 const ANIMATION_POINTS_PER_FRAME = 2;
+const STATIC_POINT_DELTA_EPSILON = 1e-4;
+const STATIC_FRAME_STREAK_TO_PAUSE = 6;
+const STATIC_IDLE_MS = 300;
 
 const sliderStyle = {
   display: "flex",
@@ -43,6 +46,8 @@ const maxInputStyle = {
 } as const;
 
 function App() {
+  const lastInteractionAtRef = useRef<number>(0);
+  const staticFrameStreakRef = useRef<number>(0);
   const [mode, setMode] = useState<Mode>("live");
   const [initialVelocity, setInitialVelocity] = useState(50);
   const [velocityMax, setVelocityMax] = useState(100);
@@ -71,6 +76,7 @@ function App() {
     hit: boolean;
     visibleCount: number;
   } | null>(null);
+  const challengeShotRef = useRef<typeof challengeShot>(null);
 
   const targetRadius = targetDiameter / 2;
 
@@ -79,22 +85,75 @@ function App() {
   const challengeComplete = isChallenge && challengeShot != null && challengeShot.visibleCount >= challengeShot.points.length;
 
   useEffect(() => {
-    if (!isChallenge) setChallengeShot(null);
-  }, [isChallenge]);
+    challengeShotRef.current = challengeShot;
+  }, [challengeShot]);
+
+  useEffect(() => {
+    const markInteraction = () => {
+      lastInteractionAtRef.current = Date.now();
+      staticFrameStreakRef.current = 0;
+    };
+    markInteraction();
+    window.addEventListener("pointerdown", markInteraction, { passive: true });
+    window.addEventListener("pointermove", markInteraction, { passive: true });
+    window.addEventListener("keydown", markInteraction);
+    window.addEventListener("touchstart", markInteraction, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", markInteraction);
+      window.removeEventListener("pointermove", markInteraction);
+      window.removeEventListener("keydown", markInteraction);
+      window.removeEventListener("touchstart", markInteraction);
+    };
+  }, []);
 
   useEffect(() => {
     if (!challengeShot || challengeShot.visibleCount >= challengeShot.points.length) return;
-    const id = setInterval(() => {
+    let lastFrameTime: number | null = null;
+    let frameId = 0;
+    const tick = (timestamp: number) => {
+      const currentShot = challengeShotRef.current;
+      if (!currentShot || currentShot.visibleCount >= currentShot.points.length) {
+        return;
+      }
+      if (lastFrameTime == null) {
+        lastFrameTime = timestamp;
+        frameId = requestAnimationFrame(tick);
+        return;
+      }
+      if (timestamp - lastFrameTime < ANIMATION_INTERVAL_MS) {
+        frameId = requestAnimationFrame(tick);
+        return;
+      }
+      lastFrameTime = timestamp;
       setChallengeShot((prev) => {
         if (!prev || prev.visibleCount >= prev.points.length) return prev;
+        const nextVisibleCount = Math.min(prev.visibleCount + ANIMATION_POINTS_PER_FRAME, prev.points.length);
+        const prevPoint = prev.points[Math.max(0, prev.visibleCount - 1)];
+        const nextPoint = prev.points[Math.max(0, nextVisibleCount - 1)];
+        const pointDelta = prevPoint && nextPoint
+          ? Math.hypot(nextPoint.x - prevPoint.x, nextPoint.y - prevPoint.y)
+          : Number.POSITIVE_INFINITY;
+        if (pointDelta <= STATIC_POINT_DELTA_EPSILON) {
+          staticFrameStreakRef.current += 1;
+        } else {
+          staticFrameStreakRef.current = 0;
+        }
+        const idleForMs = Date.now() - lastInteractionAtRef.current;
+        const shouldPauseLoop =
+          idleForMs >= STATIC_IDLE_MS && staticFrameStreakRef.current >= STATIC_FRAME_STREAK_TO_PAUSE;
+        if (shouldPauseLoop) {
+          return { ...prev, visibleCount: prev.points.length };
+        }
         return {
           ...prev,
-          visibleCount: Math.min(prev.visibleCount + ANIMATION_POINTS_PER_FRAME, prev.points.length),
+          visibleCount: nextVisibleCount,
         };
       });
-    }, ANIMATION_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [challengeShot?.visibleCount, challengeShot?.points.length]);
+      frameId = requestAnimationFrame(tick);
+    };
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, [challengeShot]);
 
   const simulationResult = useMemo(() => {
     return calculateTrajectory({
@@ -176,6 +235,8 @@ function App() {
 
   const handleFire = () => {
     if (mode !== "challenge") return;
+    staticFrameStreakRef.current = 0;
+    lastInteractionAtRef.current = Date.now();
     setChallengeShot({
       points: [...points],
       hit,
@@ -226,7 +287,11 @@ function App() {
         <span style={{ fontSize: "0.875rem", fontWeight: 500 }}>Mode:</span>
         <button
           type="button"
-          onClick={() => setMode("live")}
+          onClick={() => {
+            setMode("live");
+            staticFrameStreakRef.current = 0;
+            setChallengeShot(null);
+          }}
           style={{
             padding: "0.35rem 0.75rem",
             fontSize: "0.8125rem",
