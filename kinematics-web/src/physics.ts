@@ -60,6 +60,8 @@ export const BALL_PRESETS = {
   baseball: { mass: 0.145, radius: 0.037, dragCoefficient: 0.3 },
   /** Ping pong: ~2.7 g, ~2 cm radius, C_d ≈ 0.5 — low mass gives dramatic Magnus curves. */
   pingPong: { mass: 0.0027, radius: 0.02, dragCoefficient: 0.5 },
+  /** Cannonball: ~2.5 kg, ~9 cm radius, C_d ≈ 0.47. */
+  cannonball: { mass: 2.5, radius: 0.09, dragCoefficient: 0.47 },
 } as const;
 
 export interface TrajectoryPoint {

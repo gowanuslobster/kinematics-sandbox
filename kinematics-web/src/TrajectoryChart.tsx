@@ -1,4 +1,4 @@
-import { useMemo, useState, type FC } from "react";
+import { useEffect, useMemo, useState, type FC } from "react";
 import PlotLib from "react-plotly.js";
 import type { TrajectoryPoint } from "./physics";
 
@@ -22,6 +22,7 @@ export interface TrajectoryChartProps {
   hit?: boolean;
   pinnedPath?: TrajectoryPoint[];
   vacuumPath?: TrajectoryPoint[];
+  onHoverPointChange?: (point: TrajectoryPoint | null) => void;
 }
 
 interface PlotShape {
@@ -176,6 +177,7 @@ export function TrajectoryChart({
   hit = false,
   pinnedPath,
   vacuumPath,
+  onHoverPointChange,
 }: TrajectoryChartProps) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const x = points.map((p) => p.x);
@@ -184,6 +186,14 @@ export function TrajectoryChart({
     hoverIndex != null && hoverIndex >= 0 && hoverIndex < points.length
       ? points[hoverIndex]
       : null;
+
+  useEffect(() => {
+    onHoverPointChange?.(hoveredPoint);
+  }, [hoveredPoint, onHoverPointChange]);
+
+  useEffect(() => {
+    return () => onHoverPointChange?.(null);
+  }, [onHoverPointChange]);
 
   const data: object[] = [];
 

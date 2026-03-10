@@ -5,6 +5,7 @@ import {
   calculateTrajectory,
   type TrajectoryPoint,
 } from "./physics";
+import { PhysicsMicroscope, type MicroscopeBallType } from "./PhysicsMicroscope";
 import { TrajectoryChart } from "./TrajectoryChart";
 
 type Mode = "live" | "challenge";
@@ -58,6 +59,7 @@ function App() {
   const [dragMax, setDragMax] = useState(1);
   const [mass, setMass] = useState<number>(BALL_PRESETS.baseball.mass);
   const [radius, setRadius] = useState<number>(BALL_PRESETS.baseball.radius);
+  const [selectedBallType, setSelectedBallType] = useState<MicroscopeBallType>("baseball");
   const [spinRpm, setSpinRpm] = useState(0);
   const [airDensity, setAirDensity] = useState(AIR_DENSITY_SEA_LEVEL);
   const [targetX, setTargetX] = useState(100);
@@ -75,6 +77,7 @@ function App() {
     hit: boolean;
     visibleCount: number;
   } | null>(null);
+  const [hoveredTrajectoryPoint, setHoveredTrajectoryPoint] = useState<TrajectoryPoint | null>(null);
   const challengeShotRef = useRef<typeof challengeShot>(null);
 
   const targetRadius = targetDiameter / 2;
@@ -191,6 +194,12 @@ function App() {
   }, [mode, challengeShot, points]);
 
   const displayHit = mode === "live" ? hit : (challengeComplete && challengeShot ? challengeShot.hit : false);
+  const microscopeVelocity = hoveredTrajectoryPoint
+    ? Math.hypot(hoveredTrajectoryPoint.vx, hoveredTrajectoryPoint.vy)
+    : Math.max(initialVelocity, 0);
+  const microscopeMagnusLift = hoveredTrajectoryPoint
+    ? Math.hypot(hoveredTrajectoryPoint.magnusX, hoveredTrajectoryPoint.magnusY)
+    : 0;
 
   const handlePinCurrentTrajectory = () => {
     setPinnedTrajectory({
@@ -206,6 +215,7 @@ function App() {
     if (mode !== "challenge") return;
     staticFrameStreakRef.current = 0;
     lastInteractionAtRef.current = Date.now();
+    setHoveredTrajectoryPoint(null);
     setChallengeShot({
       points: [...points],
       hit,
@@ -259,6 +269,7 @@ function App() {
           onClick={() => {
             setMode("live");
             staticFrameStreakRef.current = 0;
+            setHoveredTrajectoryPoint(null);
             setChallengeShot(null);
           }}
           style={{
@@ -276,7 +287,10 @@ function App() {
         </button>
         <button
           type="button"
-          onClick={() => setMode("challenge")}
+          onClick={() => {
+            setMode("challenge");
+            setHoveredTrajectoryPoint(null);
+          }}
           style={{
             padding: "0.35rem 0.75rem",
             fontSize: "0.8125rem",
@@ -505,6 +519,7 @@ function App() {
                 setMass(BALL_PRESETS.baseball.mass);
                 setRadius(BALL_PRESETS.baseball.radius);
                 setDragCoefficient(BALL_PRESETS.baseball.dragCoefficient);
+                setSelectedBallType("baseball");
               }}
               style={{
                 padding: "0.35rem 0.5rem",
@@ -523,6 +538,7 @@ function App() {
                 setMass(BALL_PRESETS.pingPong.mass);
                 setRadius(BALL_PRESETS.pingPong.radius);
                 setDragCoefficient(BALL_PRESETS.pingPong.dragCoefficient);
+                setSelectedBallType("pingPong");
               }}
               style={{
                 padding: "0.35rem 0.5rem",
@@ -535,7 +551,29 @@ function App() {
             >
               Ping pong
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMass(BALL_PRESETS.cannonball.mass);
+                setRadius(BALL_PRESETS.cannonball.radius);
+                setDragCoefficient(BALL_PRESETS.cannonball.dragCoefficient);
+                setSelectedBallType("cannonball");
+              }}
+              style={{
+                padding: "0.35rem 0.5rem",
+                fontSize: "0.75rem",
+                background: "#e5e7eb",
+                border: "1px solid #d1d5db",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              Cannonball
+            </button>
           </div>
+          <span style={{ ...valueStyle, fontSize: "0.7rem" }}>
+            Selected: {selectedBallType === "pingPong" ? "Ping Pong" : selectedBallType[0].toUpperCase() + selectedBallType.slice(1)}
+          </span>
         </div>
         <div
           style={{
@@ -552,7 +590,10 @@ function App() {
             value={mass}
             onChange={(e) => {
               const n = Number(e.target.value);
-              if (!Number.isNaN(n) && n > 0) setMass(n);
+              if (!Number.isNaN(n) && n > 0) {
+                setMass(n);
+                setSelectedBallType("custom");
+              }
             }}
             style={{ ...inputStyle, padding: "0.35rem 0.5rem" }}
             aria-label="Ball mass"
@@ -573,7 +614,10 @@ function App() {
             value={radius}
             onChange={(e) => {
               const n = Number(e.target.value);
-              if (!Number.isNaN(n) && n > 0) setRadius(n);
+              if (!Number.isNaN(n) && n > 0) {
+                setRadius(n);
+                setSelectedBallType("custom");
+              }
             }}
             style={{ ...inputStyle, padding: "0.35rem 0.5rem" }}
             aria-label="Ball radius"
@@ -741,6 +785,7 @@ function App() {
             minHeight: 280,
             display: "flex",
             flexDirection: "column",
+            position: "relative",
           }}
         >
           <TrajectoryChart
@@ -754,7 +799,25 @@ function App() {
             hit={displayHit}
             pinnedPath={mode === "live" ? (pinnedTrajectory?.points ?? undefined) : undefined}
             vacuumPath={mode === "live" ? (vacuumPath ?? undefined) : undefined}
+            onHoverPointChange={setHoveredTrajectoryPoint}
           />
+          <div
+            style={{
+              position: "absolute",
+              right: "1rem",
+              bottom: "1rem",
+              zIndex: 7,
+              pointerEvents: "none",
+            }}
+          >
+            <PhysicsMicroscope
+              velocity={microscopeVelocity}
+              spinRPM={spinRpm}
+              ballType={selectedBallType}
+              airDensity={airDensity}
+              magnusLiftN={microscopeMagnusLift}
+            />
+          </div>
         </div>
         <div
           style={{
