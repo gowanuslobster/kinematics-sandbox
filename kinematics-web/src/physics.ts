@@ -65,6 +65,14 @@ export const BALL_PRESETS = {
 export interface TrajectoryPoint {
   x: number;
   y: number;
+  vx: number;
+  vy: number;
+  dragX: number;
+  dragY: number;
+  magnusX: number;
+  magnusY: number;
+  gravX: number;
+  gravY: number;
 }
 
 /** All inputs required to run the simulation. */
@@ -125,20 +133,60 @@ function analyticalTrajectory(
   angleDeg: number,
   g: number,
   numPoints: number,
+  mass: number = DEFAULT_BALL_MASS,
 ): TrajectoryPoint[] {
-  if (v0 <= 0) return [{ x: 0, y: 0 }];
+  const gravX = 0;
+  const gravY = -mass * g;
+  if (v0 <= 0) {
+    return [{
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+      dragX: 0,
+      dragY: 0,
+      magnusX: 0,
+      magnusY: 0,
+      gravX,
+      gravY,
+    }];
+  }
   const { v0x, v0y } = velocityComponents(v0, angleDeg);
 
   if (isZeroG(g)) {
     const points: TrajectoryPoint[] = [];
     for (let i = 0; i <= numPoints; i++) {
       const t = (i / numPoints) * ZERO_G_MAX_TIME;
-      points.push({ x: v0x * t, y: v0y * t });
+      points.push({
+        x: v0x * t,
+        y: v0y * t,
+        vx: v0x,
+        vy: v0y,
+        dragX: 0,
+        dragY: 0,
+        magnusX: 0,
+        magnusY: 0,
+        gravX,
+        gravY,
+      });
     }
     return points;
   }
 
-  if (v0y <= 0) return [{ x: 0, y: 0 }];
+  if (v0y <= 0) {
+    return [{
+      x: 0,
+      y: 0,
+      vx: v0x,
+      vy: v0y,
+      dragX: 0,
+      dragY: 0,
+      magnusX: 0,
+      magnusY: 0,
+      gravX,
+      gravY,
+    }];
+  }
   const tFlight = (2 * v0y) / g;
   const points: TrajectoryPoint[] = [];
   for (let i = 0; i <= numPoints; i++) {
@@ -146,6 +194,14 @@ function analyticalTrajectory(
     points.push({
       x: v0x * t,
       y: v0y * t - 0.5 * g * t * t,
+      vx: v0x,
+      vy: v0y - g * t,
+      dragX: 0,
+      dragY: 0,
+      magnusX: 0,
+      magnusY: 0,
+      gravX,
+      gravY,
     });
   }
   return points;
@@ -192,30 +248,47 @@ function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint
   let x = 0;
   let y = 0;
   let { v0x: vx, v0y: vy } = velocityComponents(initialVelocity, launchAngleDeg);
+  const gravX = 0;
+  const gravY = -m * g;
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    points.push({ x, y });
+    const v = Math.hypot(vx, vy);
+    let dragX = 0;
+    let dragY = 0;
+    let magnusX = 0;
+    let magnusY = 0;
+
+    if (rho >= RHO_EPSILON && v >= V_MIN) {
+      dragX = -0.5 * rho * cd * A * v * vx;
+      dragY = -0.5 * rho * cd * A * v * vy;
+      if (Math.abs(omegaRad) >= 1e-10) {
+        const magnus = 2 * rho * Math.PI * r * r * r * omegaRad;
+        magnusX = -magnus * vy;
+        magnusY = magnus * vx;
+      }
+    }
+
+    points.push({
+      x,
+      y,
+      vx,
+      vy,
+      dragX,
+      dragY,
+      magnusX,
+      magnusY,
+      gravX,
+      gravY,
+    });
 
     if (Math.hypot(x - targetX, y - targetY) <= targetRadius) {
       return { points, hit: true };
     }
 
-    const v = Math.hypot(vx, vy);
     if (v < V_MIN) break;
 
-    let Fx = 0;
-    let Fy = -m * g;
-
-    if (rho >= RHO_EPSILON) {
-      const vMag = v;
-      Fx += -0.5 * rho * cd * A * vMag * vx;
-      Fy += -0.5 * rho * cd * A * vMag * vy;
-      if (Math.abs(omegaRad) >= 1e-10) {
-        const magnus = 2 * rho * Math.PI * r * r * r * omegaRad;
-        Fx += -magnus * vy;
-        Fy += magnus * vx;
-      }
-    }
+    const Fx = dragX + magnusX + gravX;
+    const Fy = dragY + magnusY + gravY;
 
     const ax = Fx / m;
     const ay = Fy / m;
@@ -230,6 +303,14 @@ function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint
       points.push({
         x: x + (xNext - x) * tFrac,
         y: 0,
+        vx,
+        vy,
+        dragX,
+        dragY,
+        magnusX,
+        magnusY,
+        gravX,
+        gravY,
       });
       return { points, hit: false };
     }
@@ -247,6 +328,7 @@ function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint
  */
 export function calculateTrajectory(params: SimulationParams): SimulationResult {
   const g = normalizeGravity(params.gravity);
+  const mass = Math.max(params.mass ?? DEFAULT_BALL_MASS, 1e-10);
   const vacuum = vacuumMetrics(params.initialVelocity, params.launchAngleDeg, g);
   const useVacuum = shouldUseVacuumModel(params.airDensity, params.dragCoefficient);
 
@@ -256,6 +338,7 @@ export function calculateTrajectory(params: SimulationParams): SimulationResult 
       params.launchAngleDeg,
       g,
       300,
+      mass,
     );
     const hit =
       points.length > 0 &&
@@ -283,6 +366,7 @@ export function calculateTrajectory(params: SimulationParams): SimulationResult 
     params.launchAngleDeg,
     g,
     300,
+    mass,
   );
   const timeActual = (points.length - 1) * DT;
   const rangeActual = points.length > 0 ? points[points.length - 1].x : 0;

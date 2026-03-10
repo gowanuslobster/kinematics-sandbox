@@ -1,18 +1,15 @@
-import type { FC } from "react";
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports -- no types from package
+import { useMemo, useState, type FC } from "react";
 import PlotLib from "react-plotly.js";
+import type { TrajectoryPoint } from "./physics";
 
 const Plot = PlotLib as FC<{
   data: object[];
   layout?: object;
   config?: object;
   style?: React.CSSProperties;
+  onHover?: (event: unknown) => void;
+  onUnhover?: () => void;
 }>;
-
-export interface TrajectoryPoint {
-  x: number;
-  y: number;
-}
 
 export interface TrajectoryChartProps {
   points: TrajectoryPoint[];
@@ -23,9 +20,148 @@ export interface TrajectoryChartProps {
   targetSize?: number;
   hit?: boolean;
   pinnedPath?: TrajectoryPoint[];
-  pinnedSettings?: string;
-  currentSettings?: string;
   vacuumPath?: TrajectoryPoint[];
+}
+
+interface PlotShape {
+  type: "line" | "circle";
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  xref: "x";
+  yref: "y";
+  line: {
+    color: string;
+    width: number;
+  };
+  layer?: "above" | "below";
+  fillcolor?: string;
+  opacity?: number;
+}
+
+interface PlotHoverPoint {
+  customdata?: unknown;
+  pointNumber?: number;
+  curveNumber?: number;
+}
+
+interface PlotHoverEvent {
+  points?: PlotHoverPoint[];
+}
+
+const VECTOR_SCALE = 0.25;
+const FORCE_SCALE_MULTIPLIER = 18;
+
+function vectorMagnitude(x: number, y: number): number {
+  return Math.hypot(x, y);
+}
+
+function scaleVector(
+  x: number,
+  y: number,
+  factor: number,
+  maxLength: number,
+  minLength: number,
+): { dx: number; dy: number } {
+  const sourceLength = Math.hypot(x, y);
+  if (sourceLength < 1e-8) {
+    return { dx: 0, dy: 0 };
+  }
+  let dx = x * factor;
+  let dy = y * factor;
+  let len = Math.hypot(dx, dy);
+  if (len > 0 && len < minLength) {
+    const ratio = minLength / len;
+    dx *= ratio;
+    dy *= ratio;
+    len = Math.hypot(dx, dy);
+  }
+  if (len > maxLength && len > 0) {
+    const ratio = maxLength / len;
+    dx *= ratio;
+    dy *= ratio;
+  }
+  return { dx, dy };
+}
+
+function buildArrowShapes(
+  originX: number,
+  originY: number,
+  dx: number,
+  dy: number,
+  color: string,
+): PlotShape[] {
+  const length = Math.hypot(dx, dy);
+  if (length <= 1e-12) return [];
+
+  const xTip = originX + dx;
+  const yTip = originY + dy;
+  const ux = dx / length;
+  const uy = dy / length;
+  const headLength = length * 0.24;
+  const headWidth = length * 0.12;
+  const baseX = xTip - ux * headLength;
+  const baseY = yTip - uy * headLength;
+  const px = -uy;
+  const py = ux;
+
+  return [
+    {
+      type: "line",
+      x0: originX,
+      y0: originY,
+      x1: xTip,
+      y1: yTip,
+      xref: "x",
+      yref: "y",
+      line: { color, width: 2 },
+      layer: "above",
+    },
+    {
+      type: "line",
+      x0: xTip,
+      y0: yTip,
+      x1: baseX + px * headWidth,
+      y1: baseY + py * headWidth,
+      xref: "x",
+      yref: "y",
+      line: { color, width: 2 },
+      layer: "above",
+    },
+    {
+      type: "line",
+      x0: xTip,
+      y0: yTip,
+      x1: baseX - px * headWidth,
+      y1: baseY - py * headWidth,
+      xref: "x",
+      yref: "y",
+      line: { color, width: 2 },
+      layer: "above",
+    },
+  ];
+}
+
+function extractHoverIndex(event: unknown, pointsLength: number): number | null {
+  const hoverEvent = event as PlotHoverEvent;
+  const firstPoint = hoverEvent?.points?.[0];
+  if (!firstPoint) return null;
+  let candidateIndex: number | null = null;
+  if (typeof firstPoint.customdata === "number" && Number.isInteger(firstPoint.customdata)) {
+    candidateIndex = firstPoint.customdata;
+  } else if (
+    Array.isArray(firstPoint.customdata)
+    && typeof firstPoint.customdata[0] === "number"
+    && Number.isInteger(firstPoint.customdata[0])
+  ) {
+    candidateIndex = firstPoint.customdata[0];
+  } else if (typeof firstPoint.pointNumber === "number" && Number.isInteger(firstPoint.pointNumber)) {
+    candidateIndex = firstPoint.pointNumber;
+  }
+  if (candidateIndex == null) return null;
+  if (candidateIndex < 0 || candidateIndex >= pointsLength) return null;
+  return candidateIndex;
 }
 
 export function TrajectoryChart({
@@ -37,20 +173,15 @@ export function TrajectoryChart({
   targetSize = 5,
   hit = false,
   pinnedPath,
-  pinnedSettings,
-  currentSettings,
   vacuumPath,
 }: TrajectoryChartProps) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const x = points.map((p) => p.x);
   const y = points.map((p) => p.y);
-
-  const targetColor = hit ? "#16a34a" : "#dc2626";
-  const buildHoverTemplate = (label: string, settings?: string) => {
-    const settingsBlock = settings != null && settings.length > 0
-      ? `<br><br><b>Settings</b><br>${settings}`
-      : "";
-    return `<b>${label}</b><br>x: %{x:.2f} m<br>y: %{y:.2f} m${settingsBlock}<extra></extra>`;
-  };
+  const hoveredPoint =
+    hoverIndex != null && hoverIndex >= 0 && hoverIndex < points.length
+      ? points[hoverIndex]
+      : null;
 
   const data: object[] = [];
 
@@ -63,7 +194,7 @@ export function TrajectoryChart({
       line: { color: "#9ca3af", width: 2, dash: "dot" },
       opacity: 0.6,
       name: "Pinned trajectory",
-      hovertemplate: buildHoverTemplate("Pinned trajectory", pinnedSettings),
+      hoverinfo: "skip",
     });
   }
 
@@ -75,6 +206,7 @@ export function TrajectoryChart({
       mode: "lines",
       line: { color: "#6b7280", width: 2, dash: "dash" },
       name: "Vacuum path",
+      hoverinfo: "skip",
     });
   }
 
@@ -85,29 +217,73 @@ export function TrajectoryChart({
     mode: "lines",
     line: { shape: "spline" },
     name: "Current trajectory",
-    hovertemplate: buildHoverTemplate("Current trajectory", currentSettings),
+    customdata: points.map((_, idx) => idx),
+    hovertemplate: "<extra></extra>",
   });
 
-  const shapes =
-    targetX != null && targetY != null && targetSize > 0
-      ? [
-          {
-            type: "circle" as const,
-            x0: targetX - targetSize,
-            y0: targetY - targetSize,
-            x1: targetX + targetSize,
-            y1: targetY + targetSize,
-            line: { color: targetColor, width: 2 },
-            fillcolor: targetColor,
-            opacity: 0.4,
-          },
-        ]
-      : undefined;
+  const shapes = useMemo(() => {
+    const nextShapes: PlotShape[] = [];
+    const targetColor = hit ? "#16a34a" : "#dc2626";
+    if (targetX != null && targetY != null && targetSize > 0) {
+      nextShapes.push({
+        type: "circle",
+        x0: targetX - targetSize,
+        y0: targetY - targetSize,
+        x1: targetX + targetSize,
+        y1: targetY + targetSize,
+        xref: "x",
+        yref: "y",
+        line: { color: targetColor, width: 2 },
+        fillcolor: targetColor,
+        opacity: 0.4,
+      });
+    }
+    if (!hoveredPoint) return nextShapes;
+
+    const axisSpan = Math.max(1, Math.min(xRange[1] - xRange[0], yRange[1] - yRange[0]));
+    const maxVectorLength = axisSpan * 0.22;
+    const minVectorLength = axisSpan * 0.03;
+
+    const velocity = scaleVector(hoveredPoint.vx, hoveredPoint.vy, VECTOR_SCALE, maxVectorLength, minVectorLength);
+    const drag = scaleVector(
+      hoveredPoint.dragX,
+      hoveredPoint.dragY,
+      VECTOR_SCALE * FORCE_SCALE_MULTIPLIER,
+      maxVectorLength,
+      minVectorLength,
+    );
+    const magnus = scaleVector(
+      hoveredPoint.magnusX,
+      hoveredPoint.magnusY,
+      VECTOR_SCALE * FORCE_SCALE_MULTIPLIER,
+      maxVectorLength,
+      minVectorLength,
+    );
+    const gravity = scaleVector(
+      hoveredPoint.gravX,
+      hoveredPoint.gravY,
+      VECTOR_SCALE * FORCE_SCALE_MULTIPLIER,
+      maxVectorLength,
+      minVectorLength,
+    );
+
+    nextShapes.push(
+      ...buildArrowShapes(hoveredPoint.x, hoveredPoint.y, velocity.dx, velocity.dy, "#22c55e"),
+      ...buildArrowShapes(hoveredPoint.x, hoveredPoint.y, drag.dx, drag.dy, "#ef4444"),
+      ...buildArrowShapes(hoveredPoint.x, hoveredPoint.y, magnus.dx, magnus.dy, "#a855f7"),
+      ...buildArrowShapes(hoveredPoint.x, hoveredPoint.y, gravity.dx, gravity.dy, "#3b82f6"),
+    );
+    return nextShapes;
+  }, [hit, hoveredPoint, targetSize, targetX, targetY, xRange, yRange]);
 
   return (
-    <div style={{ flex: 1, minHeight: 0, width: "100%", display: "flex" }}>
+    <div style={{ position: "relative", flex: 1, minHeight: 0, width: "100%", display: "flex" }}>
       <Plot
         data={data}
+        onHover={(event) => {
+          setHoverIndex(extractHoverIndex(event, points.length));
+        }}
+        onUnhover={() => setHoverIndex(null)}
         layout={{
           margin: { t: 24, r: 24, b: 40, l: 48 },
           xaxis: {
@@ -122,11 +298,44 @@ export function TrajectoryChart({
           },
           showlegend: pinnedPath != null || vacuumPath != null,
           legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.8)" },
+          hovermode: "closest",
           shapes,
         }}
         config={{ responsive: true }}
         style={{ width: "100%", height: "100%", minHeight: 400 }}
       />
+      <div
+        style={{
+          position: "absolute",
+          top: 16,
+          right: 24,
+          minWidth: 250,
+          padding: "0.6rem 0.75rem",
+          borderRadius: 8,
+          background: "rgba(17, 24, 39, 0.82)",
+          color: "#e5e7eb",
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+          fontSize: "0.74rem",
+          lineHeight: 1.45,
+          pointerEvents: "none",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+          zIndex: 5,
+        }}
+      >
+        <div style={{ fontWeight: 700, marginBottom: "0.25rem", color: "#f9fafb" }}>Data HUD</div>
+        {hoveredPoint ? (
+          <>
+            <div>pos  = ({hoveredPoint.x.toFixed(2)}, {hoveredPoint.y.toFixed(2)}) m</div>
+            <div>vel  = ({hoveredPoint.vx.toFixed(2)}, {hoveredPoint.vy.toFixed(2)}) m/s</div>
+            <div>|v|  = {vectorMagnitude(hoveredPoint.vx, hoveredPoint.vy).toFixed(2)} m/s</div>
+            <div>|drag|   = {vectorMagnitude(hoveredPoint.dragX, hoveredPoint.dragY).toFixed(3)} N</div>
+            <div>|magnus| = {vectorMagnitude(hoveredPoint.magnusX, hoveredPoint.magnusY).toFixed(3)} N</div>
+            <div>|gravity|= {vectorMagnitude(hoveredPoint.gravX, hoveredPoint.gravY).toFixed(3)} N</div>
+          </>
+        ) : (
+          <div style={{ color: "#cbd5e1" }}>Hover the current trajectory to inspect vectors.</div>
+        )}
+      </div>
     </div>
   );
 }

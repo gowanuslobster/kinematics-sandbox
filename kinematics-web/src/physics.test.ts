@@ -46,6 +46,44 @@ describe("calculateTrajectory", () => {
     expect(result.maxHeightActual).toBeLessThan(result.maxHeightVacuum);
   });
 
+  it("records velocity and force components for drag integration points", () => {
+    const result = calculateTrajectory(
+      makeParams({
+        dragCoefficient: 0.5,
+        airDensity: AIR_DENSITY_SEA_LEVEL,
+        spinRpm: 1200,
+      }),
+    );
+    const sample = result.points[Math.min(10, result.points.length - 1)];
+
+    expect(Number.isFinite(sample.vx)).toBe(true);
+    expect(Number.isFinite(sample.vy)).toBe(true);
+    expect(Number.isFinite(sample.dragX)).toBe(true);
+    expect(Number.isFinite(sample.dragY)).toBe(true);
+    expect(Number.isFinite(sample.magnusX)).toBe(true);
+    expect(Number.isFinite(sample.magnusY)).toBe(true);
+    expect(sample.gravX).toBeCloseTo(0, 10);
+    expect(sample.gravY).toBeLessThan(0);
+
+    const dragDotVelocity = sample.dragX * sample.vx + sample.dragY * sample.vy;
+    expect(dragDotVelocity).toBeLessThanOrEqual(1e-8);
+    expect(Math.hypot(sample.magnusX, sample.magnusY)).toBeGreaterThan(0);
+  });
+
+  it("sets drag and magnus components to zero for vacuum paths", () => {
+    const result = calculateTrajectory(
+      makeParams({
+        dragCoefficient: 0,
+        airDensity: 0,
+      }),
+    );
+    const sample = result.points[Math.min(50, result.points.length - 1)];
+    expect(sample.dragX).toBe(0);
+    expect(sample.dragY).toBe(0);
+    expect(sample.magnusX).toBe(0);
+    expect(sample.magnusY).toBe(0);
+  });
+
   it("handles zero-gravity vacuum runs without NaN/Infinity", () => {
     const result = calculateTrajectory(
       makeParams({

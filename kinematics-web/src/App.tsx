@@ -67,7 +67,6 @@ function App() {
   const [yAxisMax, setYAxisMax] = useState(70);
   const [pinnedTrajectory, setPinnedTrajectory] = useState<{
     points: TrajectoryPoint[];
-    settings: string;
   } | null>(null);
 
   /** Challenge mode: shot data and how many points to show (animation). null = not fired yet. */
@@ -185,35 +184,6 @@ function App() {
 
   const { points, hit, vacuumPath, timeOfFlightVacuum, timeOfFlightActual, maxHeightVacuum, maxHeightActual, rangeVacuum, rangeActual } = simulationResult;
 
-  const currentTrajectorySettings = useMemo(
-    () =>
-      [
-        `v₀: ${initialVelocity.toFixed(2)} m/s`,
-        `θ: ${launchAngle.toFixed(1)}°`,
-        `g: ${gravity.toFixed(2)} m/s²`,
-        `C_d: ${dragCoefficient.toFixed(2)}`,
-        `mass: ${mass.toFixed(4)} kg`,
-        `radius: ${radius.toFixed(4)} m`,
-        `spin: ${spinRpm} rpm`,
-        `air density: ${airDensity.toFixed(3)} kg/m³`,
-        `target: (${targetX.toFixed(1)}, ${targetY.toFixed(1)}) m`,
-        `target diameter: ${targetDiameter.toFixed(1)} m`,
-      ].join("<br>"),
-    [
-      initialVelocity,
-      launchAngle,
-      gravity,
-      dragCoefficient,
-      mass,
-      radius,
-      spinRpm,
-      airDensity,
-      targetX,
-      targetY,
-      targetDiameter,
-    ],
-  );
-
   const visiblePoints: TrajectoryPoint[] = useMemo(() => {
     if (mode === "live") return points;
     if (!challengeShot) return [];
@@ -225,7 +195,6 @@ function App() {
   const handlePinCurrentTrajectory = () => {
     setPinnedTrajectory({
       points: [...points],
-      settings: currentTrajectorySettings,
     });
   };
 
@@ -783,8 +752,6 @@ function App() {
             targetSize={targetRadius}
             hit={displayHit}
             pinnedPath={mode === "live" ? (pinnedTrajectory?.points ?? undefined) : undefined}
-            pinnedSettings={mode === "live" ? (pinnedTrajectory?.settings ?? undefined) : undefined}
-            currentSettings={mode === "live" ? currentTrajectorySettings : undefined}
             vacuumPath={mode === "live" ? (vacuumPath ?? undefined) : undefined}
           />
         </div>
