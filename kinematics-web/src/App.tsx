@@ -747,6 +747,7 @@ function App() {
             points={visiblePoints}
             xRange={[0, xAxisMax]}
             yRange={[0, yAxisMax]}
+            trajectoryColor={mode === "live" ? "#d97706" : "#0284c7"}
             targetX={targetX}
             targetY={targetY}
             targetSize={targetRadius}

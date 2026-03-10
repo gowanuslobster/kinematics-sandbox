@@ -15,6 +15,7 @@ export interface TrajectoryChartProps {
   points: TrajectoryPoint[];
   xRange?: [number, number];
   yRange?: [number, number];
+  trajectoryColor?: string;
   targetX?: number;
   targetY?: number;
   targetSize?: number;
@@ -168,6 +169,7 @@ export function TrajectoryChart({
   points,
   xRange = [0, 100],
   yRange = [0, 50],
+  trajectoryColor = "#d97706",
   targetX,
   targetY,
   targetSize = 5,
@@ -215,11 +217,39 @@ export function TrajectoryChart({
     y,
     type: "scatter",
     mode: "lines",
-    line: { shape: "spline" },
+    line: { shape: "spline", color: trajectoryColor, width: 2 },
     name: "Current trajectory",
+    hoverinfo: "skip",
+  });
+
+  data.push({
+    x,
+    y,
+    type: "scatter",
+    mode: "lines",
+    line: { color: "rgba(0,0,0,0)", width: 16 },
+    name: "Hover capture",
+    showlegend: false,
     customdata: points.map((_, idx) => idx),
     hovertemplate: "<extra></extra>",
   });
+
+  if (hoveredPoint) {
+    data.push({
+      x: [hoveredPoint.x],
+      y: [hoveredPoint.y],
+      type: "scatter",
+      mode: "markers",
+      marker: {
+        size: 10,
+        color: trajectoryColor,
+        line: { color: "#ffffff", width: 1.5 },
+      },
+      name: "Hover point",
+      showlegend: false,
+      hoverinfo: "skip",
+    });
+  }
 
   const shapes = useMemo(() => {
     const nextShapes: PlotShape[] = [];
@@ -307,18 +337,20 @@ export function TrajectoryChart({
       <div
         style={{
           position: "absolute",
-          top: 16,
-          right: 24,
-          minWidth: 250,
+          top: 12,
+          right: 12,
+          minWidth: 0,
+          maxWidth: "calc(100% - 24px)",
           padding: "0.6rem 0.75rem",
           borderRadius: 8,
           background: "rgba(17, 24, 39, 0.82)",
           color: "#e5e7eb",
           fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-          fontSize: "0.74rem",
+          fontSize: "0.82rem",
           lineHeight: 1.45,
           pointerEvents: "none",
           boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+          overflow: "hidden",
           zIndex: 5,
         }}
       >
@@ -335,6 +367,26 @@ export function TrajectoryChart({
         ) : (
           <div style={{ color: "#cbd5e1" }}>Hover the current trajectory to inspect vectors.</div>
         )}
+        <div
+          style={{
+            marginTop: "0.45rem",
+            paddingTop: "0.35rem",
+            borderTop: "1px solid rgba(148,163,184,0.35)",
+            display: "grid",
+            gridTemplateColumns: "auto 1fr",
+            gap: "0.15rem 0.45rem",
+            alignItems: "center",
+          }}
+        >
+          <span style={{ color: "#22c55e", fontWeight: 700 }}>→</span>
+          <span>Velocity</span>
+          <span style={{ color: "#ef4444", fontWeight: 700 }}>→</span>
+          <span>Drag force</span>
+          <span style={{ color: "#a855f7", fontWeight: 700 }}>→</span>
+          <span>Magnus force</span>
+          <span style={{ color: "#3b82f6", fontWeight: 700 }}>→</span>
+          <span>Gravity force</span>
+        </div>
       </div>
     </div>
   );
