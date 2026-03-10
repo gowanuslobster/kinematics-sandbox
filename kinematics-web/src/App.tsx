@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AIR_DENSITY_SEA_LEVEL,
   BALL_PRESETS,
@@ -9,6 +9,7 @@ import { PhysicsMicroscope, type MicroscopeBallType } from "./PhysicsMicroscope"
 import { TrajectoryChart } from "./TrajectoryChart";
 
 type Mode = "live" | "challenge";
+type AnalysisSource = "none" | "manual" | "auto";
 
 const ANIMATION_INTERVAL_MS = 16;
 const ANIMATION_POINTS_PER_FRAME = 2;
@@ -77,7 +78,9 @@ function App() {
     hit: boolean;
     visibleCount: number;
   } | null>(null);
-  const [hoveredTrajectoryPoint, setHoveredTrajectoryPoint] = useState<TrajectoryPoint | null>(null);
+  const [activeAnalysisPoint, setActiveAnalysisPoint] = useState<TrajectoryPoint | null>(null);
+  const [analysisSource, setAnalysisSource] = useState<AnalysisSource>("none");
+  const [isAutoScrubbing, setIsAutoScrubbing] = useState(false);
   const challengeShotRef = useRef<typeof challengeShot>(null);
 
   const targetRadius = targetDiameter / 2;
@@ -115,6 +118,7 @@ function App() {
     const tick = (timestamp: number) => {
       const currentShot = challengeShotRef.current;
       if (!currentShot || currentShot.visibleCount >= currentShot.points.length) {
+        setIsAutoScrubbing(false);
         return;
       }
       if (lastFrameTime == null) {
@@ -127,30 +131,39 @@ function App() {
         return;
       }
       lastFrameTime = timestamp;
-      setChallengeShot((prev) => {
-        if (!prev || prev.visibleCount >= prev.points.length) return prev;
-        const nextVisibleCount = Math.min(prev.visibleCount + ANIMATION_POINTS_PER_FRAME, prev.points.length);
-        const prevPoint = prev.points[Math.max(0, prev.visibleCount - 1)];
-        const nextPoint = prev.points[Math.max(0, nextVisibleCount - 1)];
-        const pointDelta = prevPoint && nextPoint
-          ? Math.hypot(nextPoint.x - prevPoint.x, nextPoint.y - prevPoint.y)
-          : Number.POSITIVE_INFINITY;
-        if (pointDelta <= STATIC_POINT_DELTA_EPSILON) {
-          staticFrameStreakRef.current += 1;
-        } else {
-          staticFrameStreakRef.current = 0;
-        }
-        const idleForMs = Date.now() - lastInteractionAtRef.current;
-        const shouldPauseLoop =
-          idleForMs >= STATIC_IDLE_MS && staticFrameStreakRef.current >= STATIC_FRAME_STREAK_TO_PAUSE;
-        if (shouldPauseLoop) {
-          return { ...prev, visibleCount: prev.points.length };
-        }
-        return {
-          ...prev,
-          visibleCount: nextVisibleCount,
-        };
-      });
+      let nextVisibleCount = Math.min(
+        currentShot.visibleCount + ANIMATION_POINTS_PER_FRAME,
+        currentShot.points.length,
+      );
+      const prevPoint = currentShot.points[Math.max(0, currentShot.visibleCount - 1)];
+      const nextPoint = currentShot.points[Math.max(0, nextVisibleCount - 1)];
+      const pointDelta = prevPoint && nextPoint
+        ? Math.hypot(nextPoint.x - prevPoint.x, nextPoint.y - prevPoint.y)
+        : Number.POSITIVE_INFINITY;
+      if (pointDelta <= STATIC_POINT_DELTA_EPSILON) {
+        staticFrameStreakRef.current += 1;
+      } else {
+        staticFrameStreakRef.current = 0;
+      }
+      const idleForMs = Date.now() - lastInteractionAtRef.current;
+      const shouldPauseLoop =
+        idleForMs >= STATIC_IDLE_MS && staticFrameStreakRef.current >= STATIC_FRAME_STREAK_TO_PAUSE;
+      if (shouldPauseLoop) {
+        nextVisibleCount = currentShot.points.length;
+      }
+      const nextShot = {
+        ...currentShot,
+        visibleCount: nextVisibleCount,
+      };
+      challengeShotRef.current = nextShot;
+      setChallengeShot(nextShot);
+      if (nextVisibleCount > 0) {
+        setActiveAnalysisPoint(nextShot.points[nextVisibleCount - 1] ?? null);
+      }
+      if (nextVisibleCount >= currentShot.points.length) {
+        setIsAutoScrubbing(false);
+        return;
+      }
       frameId = requestAnimationFrame(tick);
     };
     frameId = requestAnimationFrame(tick);
@@ -194,12 +207,30 @@ function App() {
   }, [mode, challengeShot, points]);
 
   const displayHit = mode === "live" ? hit : (challengeComplete && challengeShot ? challengeShot.hit : false);
-  const microscopeVelocity = hoveredTrajectoryPoint
-    ? Math.hypot(hoveredTrajectoryPoint.vx, hoveredTrajectoryPoint.vy)
+  const microscopeVelocity = activeAnalysisPoint
+    ? Math.hypot(activeAnalysisPoint.vx, activeAnalysisPoint.vy)
     : Math.max(initialVelocity, 0);
-  const microscopeMagnusLift = hoveredTrajectoryPoint
-    ? Math.hypot(hoveredTrajectoryPoint.magnusX, hoveredTrajectoryPoint.magnusY)
+  const microscopeMagnusLift = activeAnalysisPoint
+    ? Math.hypot(activeAnalysisPoint.magnusX, activeAnalysisPoint.magnusY)
     : 0;
+
+  const handleManualAnalysisPointChange = useCallback((point: TrajectoryPoint | null) => {
+    if (isAutoScrubbing) return;
+    if (analysisSource === "auto") {
+      // After auto-scrub completes, keep final point until user deliberately hovers.
+      if (point == null) return;
+      setAnalysisSource("manual");
+      setActiveAnalysisPoint(point);
+      return;
+    }
+    if (point == null) {
+      setAnalysisSource("none");
+      setActiveAnalysisPoint(null);
+      return;
+    }
+    setAnalysisSource("manual");
+    setActiveAnalysisPoint(point);
+  }, [analysisSource, isAutoScrubbing]);
 
   const handlePinCurrentTrajectory = () => {
     setPinnedTrajectory({
@@ -215,12 +246,16 @@ function App() {
     if (mode !== "challenge") return;
     staticFrameStreakRef.current = 0;
     lastInteractionAtRef.current = Date.now();
-    setHoveredTrajectoryPoint(null);
-    setChallengeShot({
+    const shot = {
       points: [...points],
       hit,
       visibleCount: 0,
-    });
+    };
+    setAnalysisSource("auto");
+    setIsAutoScrubbing(true);
+    setActiveAnalysisPoint(shot.points[0] ?? null);
+    challengeShotRef.current = shot;
+    setChallengeShot(shot);
   };
 
   const hitHint = useMemo(() => {
@@ -269,7 +304,9 @@ function App() {
           onClick={() => {
             setMode("live");
             staticFrameStreakRef.current = 0;
-            setHoveredTrajectoryPoint(null);
+            setIsAutoScrubbing(false);
+            setAnalysisSource("none");
+            setActiveAnalysisPoint(null);
             setChallengeShot(null);
           }}
           style={{
@@ -289,7 +326,8 @@ function App() {
           type="button"
           onClick={() => {
             setMode("challenge");
-            setHoveredTrajectoryPoint(null);
+            setAnalysisSource("none");
+            setActiveAnalysisPoint(null);
           }}
           style={{
             padding: "0.35rem 0.75rem",
@@ -799,7 +837,9 @@ function App() {
             hit={displayHit}
             pinnedPath={mode === "live" ? (pinnedTrajectory?.points ?? undefined) : undefined}
             vacuumPath={mode === "live" ? (vacuumPath ?? undefined) : undefined}
-            onHoverPointChange={setHoveredTrajectoryPoint}
+            activeAnalysisPoint={activeAnalysisPoint}
+            onHoverPointChange={handleManualAnalysisPointChange}
+            isAutoSimulating={isChallenge && isAutoScrubbing}
           />
           <div
             style={{
@@ -816,6 +856,14 @@ function App() {
               ballType={selectedBallType}
               airDensity={airDensity}
               magnusLiftN={microscopeMagnusLift}
+              velocityX={activeAnalysisPoint?.vx ?? 0}
+              velocityY={activeAnalysisPoint?.vy ?? 0}
+              dragX={activeAnalysisPoint?.dragX ?? 0}
+              dragY={activeAnalysisPoint?.dragY ?? 0}
+              magnusX={activeAnalysisPoint?.magnusX ?? 0}
+              magnusY={activeAnalysisPoint?.magnusY ?? 0}
+              gravityX={activeAnalysisPoint?.gravX ?? 0}
+              gravityY={activeAnalysisPoint?.gravY ?? -(mass * gravity)}
             />
           </div>
         </div>

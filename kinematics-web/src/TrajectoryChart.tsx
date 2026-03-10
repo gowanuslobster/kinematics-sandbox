@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FC } from "react";
+import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import PlotLib from "react-plotly.js";
 import type { TrajectoryPoint } from "./physics";
 
@@ -22,6 +22,8 @@ export interface TrajectoryChartProps {
   hit?: boolean;
   pinnedPath?: TrajectoryPoint[];
   vacuumPath?: TrajectoryPoint[];
+  activeAnalysisPoint?: TrajectoryPoint | null;
+  isAutoSimulating?: boolean;
   onHoverPointChange?: (point: TrajectoryPoint | null) => void;
 }
 
@@ -42,18 +44,10 @@ interface PlotShape {
   opacity?: number;
 }
 
-interface PlotHoverPoint {
-  customdata?: unknown;
-  pointNumber?: number;
-  curveNumber?: number;
-}
-
-interface PlotHoverEvent {
-  points?: PlotHoverPoint[];
-}
-
 const VECTOR_SCALE = 0.25;
 const FORCE_SCALE_MULTIPLIER = 18;
+const PLOT_MARGIN = { t: 24, r: 24, b: 40, l: 48 };
+const HOVER_DISTANCE_PX = 120;
 
 function vectorMagnitude(x: number, y: number): number {
   return Math.hypot(x, y);
@@ -145,27 +139,6 @@ function buildArrowShapes(
   ];
 }
 
-function extractHoverIndex(event: unknown, pointsLength: number): number | null {
-  const hoverEvent = event as PlotHoverEvent;
-  const firstPoint = hoverEvent?.points?.[0];
-  if (!firstPoint) return null;
-  let candidateIndex: number | null = null;
-  if (typeof firstPoint.customdata === "number" && Number.isInteger(firstPoint.customdata)) {
-    candidateIndex = firstPoint.customdata;
-  } else if (
-    Array.isArray(firstPoint.customdata)
-    && typeof firstPoint.customdata[0] === "number"
-    && Number.isInteger(firstPoint.customdata[0])
-  ) {
-    candidateIndex = firstPoint.customdata[0];
-  } else if (typeof firstPoint.pointNumber === "number" && Number.isInteger(firstPoint.pointNumber)) {
-    candidateIndex = firstPoint.pointNumber;
-  }
-  if (candidateIndex == null) return null;
-  if (candidateIndex < 0 || candidateIndex >= pointsLength) return null;
-  return candidateIndex;
-}
-
 export function TrajectoryChart({
   points,
   xRange = [0, 100],
@@ -177,23 +150,23 @@ export function TrajectoryChart({
   hit = false,
   pinnedPath,
   vacuumPath,
+  activeAnalysisPoint,
+  isAutoSimulating = false,
   onHoverPointChange,
 }: TrajectoryChartProps) {
+  const plotContainerRef = useRef<HTMLDivElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const x = points.map((p) => p.x);
   const y = points.map((p) => p.y);
-  const hoveredPoint =
+  const manualHoveredPoint =
     hoverIndex != null && hoverIndex >= 0 && hoverIndex < points.length
       ? points[hoverIndex]
       : null;
+  const analysisPoint = activeAnalysisPoint ?? manualHoveredPoint;
 
   useEffect(() => {
-    onHoverPointChange?.(hoveredPoint);
-  }, [hoveredPoint, onHoverPointChange]);
-
-  useEffect(() => {
-    return () => onHoverPointChange?.(null);
-  }, [onHoverPointChange]);
+    onHoverPointChange?.(manualHoveredPoint);
+  }, [manualHoveredPoint, onHoverPointChange]);
 
   const data: object[] = [];
 
@@ -229,7 +202,8 @@ export function TrajectoryChart({
     mode: "lines",
     line: { shape: "spline", color: trajectoryColor, width: 2 },
     name: "Current trajectory",
-    hoverinfo: "skip",
+    customdata: points.map((_, idx) => idx),
+    hovertemplate: "<extra></extra>",
   });
 
   data.push({
@@ -237,17 +211,17 @@ export function TrajectoryChart({
     y,
     type: "scatter",
     mode: "lines",
-    line: { color: "rgba(0,0,0,0)", width: 16 },
+    line: { color: "rgba(99,102,241,0.001)", width: 60 },
     name: "Hover capture",
     showlegend: false,
     customdata: points.map((_, idx) => idx),
     hovertemplate: "<extra></extra>",
   });
 
-  if (hoveredPoint) {
+  if (analysisPoint) {
     data.push({
-      x: [hoveredPoint.x],
-      y: [hoveredPoint.y],
+      x: [analysisPoint.x],
+      y: [analysisPoint.y],
       type: "scatter",
       mode: "markers",
       marker: {
@@ -278,54 +252,97 @@ export function TrajectoryChart({
         opacity: 0.4,
       });
     }
-    if (!hoveredPoint) return nextShapes;
+    if (!analysisPoint) return nextShapes;
 
     const axisSpan = Math.max(1, Math.min(xRange[1] - xRange[0], yRange[1] - yRange[0]));
     const maxVectorLength = axisSpan * 0.22;
     const minVectorLength = axisSpan * 0.03;
 
-    const velocity = scaleVector(hoveredPoint.vx, hoveredPoint.vy, VECTOR_SCALE, maxVectorLength, minVectorLength);
+    const velocity = scaleVector(analysisPoint.vx, analysisPoint.vy, VECTOR_SCALE, maxVectorLength, minVectorLength);
     const drag = scaleVector(
-      hoveredPoint.dragX,
-      hoveredPoint.dragY,
+      analysisPoint.dragX,
+      analysisPoint.dragY,
       VECTOR_SCALE * FORCE_SCALE_MULTIPLIER,
       maxVectorLength,
       minVectorLength,
     );
     const magnus = scaleVector(
-      hoveredPoint.magnusX,
-      hoveredPoint.magnusY,
+      analysisPoint.magnusX,
+      analysisPoint.magnusY,
       VECTOR_SCALE * FORCE_SCALE_MULTIPLIER,
       maxVectorLength,
       minVectorLength,
     );
     const gravity = scaleVector(
-      hoveredPoint.gravX,
-      hoveredPoint.gravY,
+      analysisPoint.gravX,
+      analysisPoint.gravY,
       VECTOR_SCALE * FORCE_SCALE_MULTIPLIER,
       maxVectorLength,
       minVectorLength,
     );
 
     nextShapes.push(
-      ...buildArrowShapes(hoveredPoint.x, hoveredPoint.y, velocity.dx, velocity.dy, "#22c55e"),
-      ...buildArrowShapes(hoveredPoint.x, hoveredPoint.y, drag.dx, drag.dy, "#ef4444"),
-      ...buildArrowShapes(hoveredPoint.x, hoveredPoint.y, magnus.dx, magnus.dy, "#a855f7"),
-      ...buildArrowShapes(hoveredPoint.x, hoveredPoint.y, gravity.dx, gravity.dy, "#3b82f6"),
+      ...buildArrowShapes(analysisPoint.x, analysisPoint.y, velocity.dx, velocity.dy, "#22c55e"),
+      ...buildArrowShapes(analysisPoint.x, analysisPoint.y, drag.dx, drag.dy, "#ef4444"),
+      ...buildArrowShapes(analysisPoint.x, analysisPoint.y, magnus.dx, magnus.dy, "#a855f7"),
+      ...buildArrowShapes(analysisPoint.x, analysisPoint.y, gravity.dx, gravity.dy, "#3b82f6"),
     );
     return nextShapes;
-  }, [hit, hoveredPoint, targetSize, targetX, targetY, xRange, yRange]);
+  }, [analysisPoint, hit, targetSize, targetX, targetY, xRange, yRange]);
+
+  const handlePlotMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (points.length === 0) {
+      setHoverIndex(null);
+      return;
+    }
+    const container = plotContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const localX = event.clientX - rect.left;
+    const localY = event.clientY - rect.top;
+    const plotWidth = rect.width - PLOT_MARGIN.l - PLOT_MARGIN.r;
+    const plotHeight = rect.height - PLOT_MARGIN.t - PLOT_MARGIN.b;
+    if (plotWidth <= 0 || plotHeight <= 0) return;
+    if (
+      localX < PLOT_MARGIN.l
+      || localX > PLOT_MARGIN.l + plotWidth
+      || localY < PLOT_MARGIN.t
+      || localY > PLOT_MARGIN.t + plotHeight
+    ) {
+      setHoverIndex(null);
+      return;
+    }
+
+    const xSpan = Math.max(1e-9, xRange[1] - xRange[0]);
+    const ySpan = Math.max(1e-9, yRange[1] - yRange[0]);
+    let closestIdx = -1;
+    let closestDistPx = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      const px = PLOT_MARGIN.l + ((p.x - xRange[0]) / xSpan) * plotWidth;
+      const py = PLOT_MARGIN.t + ((yRange[1] - p.y) / ySpan) * plotHeight;
+      const dist = Math.hypot(localX - px, localY - py);
+      if (dist < closestDistPx) {
+        closestDistPx = dist;
+        closestIdx = i;
+      }
+    }
+    if (closestIdx >= 0 && closestDistPx <= HOVER_DISTANCE_PX) {
+      setHoverIndex(closestIdx);
+    } else {
+      setHoverIndex(null);
+    }
+  };
 
   return (
-    <div style={{ position: "relative", flex: 1, minHeight: 0, width: "100%", display: "flex" }}>
+    <div
+      ref={plotContainerRef}
+      style={{ position: "relative", flex: 1, minHeight: 0, width: "100%", display: "flex" }}
+    >
       <Plot
         data={data}
-        onHover={(event) => {
-          setHoverIndex(extractHoverIndex(event, points.length));
-        }}
-        onUnhover={() => setHoverIndex(null)}
         layout={{
-          margin: { t: 24, r: 24, b: 40, l: 48 },
+          margin: PLOT_MARGIN,
           xaxis: {
             title: "Distance",
             showgrid: true,
@@ -343,6 +360,16 @@ export function TrajectoryChart({
         }}
         config={{ responsive: true }}
         style={{ width: "100%", height: "100%", minHeight: 400 }}
+      />
+      <div
+        onMouseMove={handlePlotMouseMove}
+        onMouseLeave={() => setHoverIndex(null)}
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 4,
+          background: "transparent",
+        }}
       />
       <div
         style={{
@@ -365,14 +392,17 @@ export function TrajectoryChart({
         }}
       >
         <div style={{ fontWeight: 700, marginBottom: "0.25rem", color: "#f9fafb" }}>Projectile Stats</div>
-        {hoveredPoint ? (
+        {isAutoSimulating && (
+          <div style={{ color: "#fbbf24", fontWeight: 700, marginBottom: "0.2rem" }}>Simulating...</div>
+        )}
+        {analysisPoint ? (
           <>
-            <div>pos  = ({hoveredPoint.x.toFixed(2)}, {hoveredPoint.y.toFixed(2)}) m</div>
-            <div>vel  = ({hoveredPoint.vx.toFixed(2)}, {hoveredPoint.vy.toFixed(2)}) m/s</div>
-            <div>|v|  = {vectorMagnitude(hoveredPoint.vx, hoveredPoint.vy).toFixed(2)} m/s</div>
-            <div>|drag|   = {vectorMagnitude(hoveredPoint.dragX, hoveredPoint.dragY).toFixed(3)} N</div>
-            <div>|magnus| = {vectorMagnitude(hoveredPoint.magnusX, hoveredPoint.magnusY).toFixed(3)} N</div>
-            <div>|gravity|= {vectorMagnitude(hoveredPoint.gravX, hoveredPoint.gravY).toFixed(3)} N</div>
+            <div>pos  = ({analysisPoint.x.toFixed(2)}, {analysisPoint.y.toFixed(2)}) m</div>
+            <div>vel  = ({analysisPoint.vx.toFixed(2)}, {analysisPoint.vy.toFixed(2)}) m/s</div>
+            <div>|v|  = {vectorMagnitude(analysisPoint.vx, analysisPoint.vy).toFixed(2)} m/s</div>
+            <div>|drag|   = {vectorMagnitude(analysisPoint.dragX, analysisPoint.dragY).toFixed(3)} N</div>
+            <div>|magnus| = {vectorMagnitude(analysisPoint.magnusX, analysisPoint.magnusY).toFixed(3)} N</div>
+            <div>|gravity|= {vectorMagnitude(analysisPoint.gravX, analysisPoint.gravY).toFixed(3)} N</div>
           </>
         ) : (
           <div style={{ color: "#cbd5e1" }}>Hover the current trajectory to inspect vectors.</div>

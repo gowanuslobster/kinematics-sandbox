@@ -8,6 +8,14 @@ export interface PhysicsMicroscopeProps {
   ballType: MicroscopeBallType;
   airDensity: number;
   magnusLiftN: number;
+  velocityX: number;
+  velocityY: number;
+  dragX: number;
+  dragY: number;
+  magnusX: number;
+  magnusY: number;
+  gravityX: number;
+  gravityY: number;
 }
 
 const VIEW_WIDTH = 320;
@@ -37,6 +45,52 @@ function describeBall(ballType: MicroscopeBallType): string {
     default:
       return "Custom";
   }
+}
+
+function scaleVector(
+  x: number,
+  y: number,
+  factor: number,
+  minLength: number,
+  maxLength: number,
+): { dx: number; dy: number } {
+  const sourceLength = Math.hypot(x, y);
+  if (sourceLength < 1e-8) return { dx: 0, dy: 0 };
+  let dx = x * factor;
+  let dy = y * factor;
+  let len = Math.hypot(dx, dy);
+  if (len > 0 && len < minLength) {
+    const ratio = minLength / len;
+    dx *= ratio;
+    dy *= ratio;
+    len = Math.hypot(dx, dy);
+  }
+  if (len > maxLength && len > 0) {
+    const ratio = maxLength / len;
+    dx *= ratio;
+    dy *= ratio;
+  }
+  return { dx, dy };
+}
+
+function buildArrowPath(cx: number, cy: number, dx: number, dy: number): string {
+  const length = Math.hypot(dx, dy);
+  if (length <= 1e-10) return "";
+  const tx = cx + dx;
+  const ty = cy + dy;
+  const ux = dx / length;
+  const uy = dy / length;
+  const headLength = Math.max(5, length * 0.3);
+  const headWidth = Math.max(3, length * 0.18);
+  const baseX = tx - ux * headLength;
+  const baseY = ty - uy * headLength;
+  const px = -uy;
+  const py = ux;
+  const leftX = baseX + px * headWidth;
+  const leftY = baseY + py * headWidth;
+  const rightX = baseX - px * headWidth;
+  const rightY = baseY - py * headWidth;
+  return `M ${cx},${cy} L ${tx},${ty} M ${tx},${ty} L ${leftX},${leftY} M ${tx},${ty} L ${rightX},${rightY}`;
 }
 
 function SeamTexture({ ballType }: { ballType: MicroscopeBallType }) {
@@ -72,6 +126,14 @@ export function PhysicsMicroscope({
   ballType,
   airDensity,
   magnusLiftN,
+  velocityX,
+  velocityY,
+  dragX,
+  dragY,
+  magnusX,
+  magnusY,
+  gravityX,
+  gravityY,
 }: PhysicsMicroscopeProps) {
   const [rotationDeg, setRotationDeg] = useState(0);
   const spinRad = (spinRPM * 2 * Math.PI) / 60;
@@ -135,6 +197,16 @@ export function PhysicsMicroscope({
   }, [spinRPM, spinRatio]);
 
   const ballRadius = BALL_RADII[ballType];
+  const vectorMinLength = 10;
+  const vectorMaxLength = 48;
+  const velocityVector = scaleVector(velocityX, velocityY, 0.25, vectorMinLength, vectorMaxLength);
+  const dragVector = scaleVector(dragX, dragY, 1.6, vectorMinLength, vectorMaxLength);
+  const magnusVector = scaleVector(magnusX, magnusY, 1.6, vectorMinLength, vectorMaxLength);
+  const gravityVector = scaleVector(gravityX, gravityY, 1.6, vectorMinLength, vectorMaxLength);
+  const velocityArrow = buildArrowPath(BALL_CX, BALL_CY, velocityVector.dx, velocityVector.dy);
+  const dragArrow = buildArrowPath(BALL_CX, BALL_CY, dragVector.dx, dragVector.dy);
+  const magnusArrow = buildArrowPath(BALL_CX, BALL_CY, magnusVector.dx, magnusVector.dy);
+  const gravityArrow = buildArrowPath(BALL_CX, BALL_CY, gravityVector.dx, gravityVector.dy);
   const topPressureColor = spinRPM >= 0 ? "rgba(59,130,246,0.35)" : "rgba(239,68,68,0.35)";
   const bottomPressureColor = spinRPM >= 0 ? "rgba(239,68,68,0.33)" : "rgba(59,130,246,0.35)";
   const ballFill = ballType === "cannonball" ? "#6b7280" : ballType === "pingPong" ? "#fde68a" : "#f8fafc";
@@ -182,6 +254,18 @@ export function PhysicsMicroscope({
           <SeamTexture ballType={ballType} />
         </g>
         <circle cx={BALL_CX - ballRadius * 0.26} cy={BALL_CY - ballRadius * 0.3} r={ballRadius * 0.2} fill="rgba(255,255,255,0.4)" />
+        {velocityArrow.length > 0 && (
+          <path d={velocityArrow} stroke="#22c55e" strokeWidth={2} fill="none" strokeLinecap="round" />
+        )}
+        {dragArrow.length > 0 && (
+          <path d={dragArrow} stroke="#ef4444" strokeWidth={2} fill="none" strokeLinecap="round" />
+        )}
+        {magnusArrow.length > 0 && (
+          <path d={magnusArrow} stroke="#a855f7" strokeWidth={2} fill="none" strokeLinecap="round" />
+        )}
+        {gravityArrow.length > 0 && (
+          <path d={gravityArrow} stroke="#3b82f6" strokeWidth={2} fill="none" strokeLinecap="round" />
+        )}
       </svg>
 
       <div
