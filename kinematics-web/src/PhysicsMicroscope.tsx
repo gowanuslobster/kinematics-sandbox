@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useId, type PointerEvent as ReactPointerEvent } from "react";
 import { AIR_DENSITY_SEA_LEVEL } from "./physics";
 
 export type MicroscopeBallType = "baseball" | "pingPong" | "cannonball" | "custom";
@@ -19,20 +19,32 @@ export interface PhysicsMicroscopeProps {
   gravityY: number;
 }
 
-const VIEW_WIDTH = 320;
-const VIEW_HEIGHT = 220;
-const BALL_CX = 166;
-const BALL_CY = 112;
+type VectorKey = "velocity" | "drag" | "magnus" | "gravity";
 
-const BALL_RADII: Record<MicroscopeBallType, number> = {
-  baseball: 36,
-  pingPong: 30,
-  cannonball: 42,
-  custom: 34,
-};
+const PANEL_MIN_WIDTH = 300;
+const PANEL_MIN_HEIGHT = 320;
+const PANEL_DEFAULT_WIDTH = 360;
+const PANEL_DEFAULT_HEIGHT = 390;
+const PANEL_PADDING = 10;
+const HEADER_HEIGHT = 38;
+const DETAILS_HEIGHT = 132;
+
+const VECTOR_META: Array<{ key: VectorKey; label: string; color: string }> = [
+  { key: "velocity", label: "Velocity", color: "#22c55e" },
+  { key: "drag", label: "Drag", color: "#ef4444" },
+  { key: "magnus", label: "Magnus", color: "#a855f7" },
+  { key: "gravity", label: "Gravity", color: "#3b82f6" },
+];
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function getViewport() {
+  if (typeof window === "undefined") {
+    return { width: 1400, height: 900 };
+  }
+  return { width: window.innerWidth, height: window.innerHeight };
 }
 
 function describeBall(ballType: MicroscopeBallType): string {
@@ -81,8 +93,8 @@ function buildArrowPath(cx: number, cy: number, dx: number, dy: number): string 
   const ty = cy + dy;
   const ux = dx / length;
   const uy = dy / length;
-  const headLength = Math.max(5, length * 0.3);
-  const headWidth = Math.max(3, length * 0.18);
+  const headLength = Math.max(6, length * 0.3);
+  const headWidth = Math.max(3.5, length * 0.18);
   const baseX = tx - ux * headLength;
   const baseY = ty - uy * headLength;
   const px = -uy;
@@ -94,31 +106,153 @@ function buildArrowPath(cx: number, cy: number, dx: number, dy: number): string 
   return `M ${cx},${cy} L ${tx},${ty} M ${tx},${ty} L ${leftX},${leftY} M ${tx},${ty} L ${rightX},${rightY}`;
 }
 
-function SeamTexture({ ballType }: { ballType: MicroscopeBallType }) {
+function SeamTexture({
+  ballType,
+  cx,
+  cy,
+  radius,
+}: {
+  ballType: MicroscopeBallType;
+  cx: number;
+  cy: number;
+  radius: number;
+}) {
   if (ballType === "cannonball") {
     return (
       <>
-        <circle cx={BALL_CX - 10} cy={BALL_CY - 12} r={4} fill="#374151" />
-        <circle cx={BALL_CX + 12} cy={BALL_CY - 8} r={3.5} fill="#4b5563" />
-        <circle cx={BALL_CX - 6} cy={BALL_CY + 14} r={3.5} fill="#374151" />
-        <circle cx={BALL_CX + 14} cy={BALL_CY + 12} r={4} fill="#4b5563" />
+        <circle cx={cx - radius * 0.28} cy={cy - radius * 0.34} r={radius * 0.12} fill="#374151" />
+        <circle cx={cx + radius * 0.3} cy={cy - radius * 0.24} r={radius * 0.11} fill="#4b5563" />
+        <circle cx={cx - radius * 0.16} cy={cy + radius * 0.34} r={radius * 0.11} fill="#374151" />
+        <circle cx={cx + radius * 0.34} cy={cy + radius * 0.28} r={radius * 0.12} fill="#4b5563" />
       </>
     );
   }
   if (ballType === "pingPong") {
     return (
       <>
-        <path d={`M ${BALL_CX - 18} ${BALL_CY - 8} C ${BALL_CX - 4} ${BALL_CY - 2}, ${BALL_CX + 10} ${BALL_CY - 2}, ${BALL_CX + 22} ${BALL_CY - 8}`} stroke="#f8fafc" strokeWidth={2} fill="none" />
-        <path d={`M ${BALL_CX - 18} ${BALL_CY + 8} C ${BALL_CX - 4} ${BALL_CY + 2}, ${BALL_CX + 10} ${BALL_CY + 2}, ${BALL_CX + 22} ${BALL_CY + 8}`} stroke="#e2e8f0" strokeWidth={2} fill="none" />
+        <path d={`M ${cx - radius * 0.65} ${cy - radius * 0.28} C ${cx - radius * 0.1} ${cy - radius * 0.06}, ${cx + radius * 0.36} ${cy - radius * 0.06}, ${cx + radius * 0.74} ${cy - radius * 0.28}`} stroke="#f8fafc" strokeWidth={2} fill="none" />
+        <path d={`M ${cx - radius * 0.65} ${cy + radius * 0.28} C ${cx - radius * 0.1} ${cy + radius * 0.06}, ${cx + radius * 0.36} ${cy + radius * 0.06}, ${cx + radius * 0.74} ${cy + radius * 0.28}`} stroke="#e2e8f0" strokeWidth={2} fill="none" />
       </>
     );
   }
   return (
     <>
-      <path d={`M ${BALL_CX - 26} ${BALL_CY - 16} C ${BALL_CX - 6} ${BALL_CY - 30}, ${BALL_CX + 10} ${BALL_CY - 30}, ${BALL_CX + 24} ${BALL_CY - 18}`} stroke="#ef4444" strokeWidth={3} fill="none" />
-      <path d={`M ${BALL_CX - 24} ${BALL_CY + 16} C ${BALL_CX - 10} ${BALL_CY + 30}, ${BALL_CX + 8} ${BALL_CY + 30}, ${BALL_CX + 26} ${BALL_CY + 14}`} stroke="#ef4444" strokeWidth={3} fill="none" />
+      <path d={`M ${cx - radius * 0.72} ${cy - radius * 0.44} C ${cx - radius * 0.18} ${cy - radius * 0.86}, ${cx + radius * 0.28} ${cy - radius * 0.84}, ${cx + radius * 0.7} ${cy - radius * 0.5}`} stroke="#ef4444" strokeWidth={3} fill="none" />
+      <path d={`M ${cx - radius * 0.66} ${cy + radius * 0.44} C ${cx - radius * 0.28} ${cy + radius * 0.84}, ${cx + radius * 0.24} ${cy + radius * 0.84}, ${cx + radius * 0.74} ${cy + radius * 0.4}`} stroke="#ef4444" strokeWidth={3} fill="none" />
     </>
   );
+}
+
+function useDraggableResizableWindow() {
+  const [size, setSize] = useState(() => {
+    const viewport = getViewport();
+    return {
+      width: clamp(PANEL_DEFAULT_WIDTH, PANEL_MIN_WIDTH, viewport.width - PANEL_PADDING * 2),
+      height: clamp(PANEL_DEFAULT_HEIGHT, PANEL_MIN_HEIGHT, viewport.height - PANEL_PADDING * 2),
+    };
+  });
+  const [position, setPosition] = useState(() => {
+    const viewport = getViewport();
+    const width = clamp(PANEL_DEFAULT_WIDTH, PANEL_MIN_WIDTH, viewport.width - PANEL_PADDING * 2);
+    const height = clamp(PANEL_DEFAULT_HEIGHT, PANEL_MIN_HEIGHT, viewport.height - PANEL_PADDING * 2);
+    return {
+      x: clamp(viewport.width - width - 24, PANEL_PADDING, viewport.width - width - PANEL_PADDING),
+      y: clamp(viewport.height - height - 24, PANEL_PADDING, viewport.height - height - PANEL_PADDING),
+    };
+  });
+  const actionRef = useRef<{
+    type: "drag" | "resize";
+    startX: number;
+    startY: number;
+    startPosX: number;
+    startPosY: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
+
+  const clampSize = useCallback((width: number, height: number) => {
+    const viewport = getViewport();
+    return {
+      width: clamp(width, PANEL_MIN_WIDTH, Math.max(PANEL_MIN_WIDTH, viewport.width - PANEL_PADDING * 2)),
+      height: clamp(height, PANEL_MIN_HEIGHT, Math.max(PANEL_MIN_HEIGHT, viewport.height - PANEL_PADDING * 2)),
+    };
+  }, []);
+
+  const clampPosition = useCallback((x: number, y: number, panelSize = size) => {
+    const viewport = getViewport();
+    return {
+      x: clamp(x, PANEL_PADDING, Math.max(PANEL_PADDING, viewport.width - panelSize.width - PANEL_PADDING)),
+      y: clamp(y, PANEL_PADDING, Math.max(PANEL_PADDING, viewport.height - panelSize.height - PANEL_PADDING)),
+    };
+  }, [size]);
+
+  const beginDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    event.preventDefault();
+    actionRef.current = {
+      type: "drag",
+      startX: event.clientX,
+      startY: event.clientY,
+      startPosX: position.x,
+      startPosY: position.y,
+      startWidth: size.width,
+      startHeight: size.height,
+    };
+  }, [position.x, position.y, size.height, size.width]);
+
+  const beginResize = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    actionRef.current = {
+      type: "resize",
+      startX: event.clientX,
+      startY: event.clientY,
+      startPosX: position.x,
+      startPosY: position.y,
+      startWidth: size.width,
+      startHeight: size.height,
+    };
+  }, [position.x, position.y, size.height, size.width]);
+
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      const action = actionRef.current;
+      if (!action) return;
+      if (action.type === "drag") {
+        const nextX = action.startPosX + (event.clientX - action.startX);
+        const nextY = action.startPosY + (event.clientY - action.startY);
+        setPosition(clampPosition(nextX, nextY));
+      } else {
+        const proposedWidth = action.startWidth + (event.clientX - action.startX);
+        const proposedHeight = action.startHeight + (event.clientY - action.startY);
+        const nextSize = clampSize(proposedWidth, proposedHeight);
+        setSize(nextSize);
+        setPosition((prev) => clampPosition(prev.x, prev.y, nextSize));
+      }
+    };
+    const onPointerUp = () => {
+      actionRef.current = null;
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [clampPosition, clampSize]);
+
+  useEffect(() => {
+    const onResize = () => {
+      setSize((prev) => {
+        const next = clampSize(prev.width, prev.height);
+        setPosition((current) => clampPosition(current.x, current.y, next));
+        return next;
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [clampPosition, clampSize]);
+
+  return { position, size, beginDrag, beginResize };
 }
 
 export function PhysicsMicroscope({
@@ -136,7 +270,17 @@ export function PhysicsMicroscope({
   gravityX,
   gravityY,
 }: PhysicsMicroscopeProps) {
+  const gradientsId = useId();
   const [rotationDeg, setRotationDeg] = useState(0);
+  const [expanded, setExpanded] = useState(true);
+  const [visibleVectors, setVisibleVectors] = useState<Record<VectorKey, boolean>>({
+    velocity: true,
+    drag: true,
+    magnus: true,
+    gravity: true,
+  });
+  const { position, size, beginDrag, beginResize } = useDraggableResizableWindow();
+
   const spinRad = (spinRPM * 2 * Math.PI) / 60;
   const ballRadiusMeters = useMemo(() => {
     switch (ballType) {
@@ -154,9 +298,7 @@ export function PhysicsMicroscope({
   const spinRatio = (spinRad * ballRadiusMeters) / speedSafe;
 
   useEffect(() => {
-    if (Math.abs(spinRPM) < 0.01) {
-      return;
-    }
+    if (Math.abs(spinRPM) < 0.01) return;
     let rafId = 0;
     let previousTime = performance.now();
     const step = (time: number) => {
@@ -168,146 +310,283 @@ export function PhysicsMicroscope({
     rafId = requestAnimationFrame(step);
     return () => cancelAnimationFrame(rafId);
   }, [spinRPM]);
-  const displayedRotationDeg = Math.abs(spinRPM) < 0.01 ? 0 : rotationDeg;
 
-  const ballRadius = BALL_RADII[ballType];
+  const panelHeight = expanded ? size.height : HEADER_HEIGHT + 2;
+  const vizHeight = Math.max(140, panelHeight - HEADER_HEIGHT - DETAILS_HEIGHT);
+  const svgWidth = size.width;
+  const centerX = svgWidth * 0.5;
+  const centerY = vizHeight * 0.52;
+  const baseRadiusFactor: Record<MicroscopeBallType, number> = {
+    baseball: 0.18,
+    pingPong: 0.16,
+    cannonball: 0.2,
+    custom: 0.17,
+  };
+  const ballRadius = clamp(
+    Math.min(svgWidth, vizHeight) * baseRadiusFactor[ballType],
+    18,
+    Math.min(svgWidth, vizHeight) * 0.26,
+  );
   const densityRatio = clamp(airDensity / AIR_DENSITY_SEA_LEVEL, 0, 1);
+
   const flowVectorX = Math.abs(velocityX) < 0.01 && Math.abs(velocityY) < 0.01 ? 1 : velocityX;
-  // SVG Y increases downward, so convert physics Y-up velocity to screen-space for angle.
+  // Convert from physics Y-up vectors to SVG Y-down orientation.
   const flowVectorY = Math.abs(velocityX) < 0.01 && Math.abs(velocityY) < 0.01 ? 0 : -velocityY;
   const flowAngleDeg = (Math.atan2(flowVectorY, flowVectorX) * 180) / Math.PI;
+
   const streamlines = useMemo(() => {
     const lines: string[] = [];
-    const count = 12;
-    const xMin = -148;
-    const xMax = 148;
-    const spinSign = Math.sign(spinRPM);
+    const count = clamp(Math.round(vizHeight / 18), 9, 16);
+    const xMin = -svgWidth * 0.48;
+    const xMax = svgWidth * 0.48;
+    const withFlowSide = spinRatio >= 0 ? -1 : 1;
     const spinStrength = clamp(Math.abs(spinRatio) * 2.2, 0, 1.4);
-    const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.4);
+    const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.5);
+    const ySpread = Math.max(90, vizHeight * 0.74);
+    const step = Math.max(8, Math.round(svgWidth / 30));
     for (let i = 0; i < count; i++) {
-      const y0 = ((i / (count - 1)) - 0.5) * 150;
-      const ny = clamp(y0 / 75, -1, 1);
+      const y0 = ((i / (count - 1)) - 0.5) * ySpread;
+      const ny = clamp(y0 / (ySpread * 0.5), -1, 1);
+      const sideSign = Math.sign(y0 === 0 ? 1 : y0);
+      const pressureFactor = sideSign === withFlowSide ? -1 : 1;
       const pathParts: string[] = [];
-      for (let x = xMin; x <= xMax; x += 12) {
-        const nx = x / (ballRadius * 2.4);
-        const radialInfluence = Math.exp(-(nx * nx + ny * ny) * 1.15);
-        const localInfluence = Math.exp(-Math.pow(x / (ballRadius * 2.1), 2));
-        const deflectAroundBall =
-          Math.sign(y0 === 0 ? 1 : y0) * radialInfluence * (ballRadius * (0.48 + flowStrength * 0.22));
+      for (let x = xMin; x <= xMax; x += step) {
+        const nx = x / (ballRadius * 2.8);
+        const radialInfluence = Math.exp(-(nx * nx + ny * ny) * 1.2);
+        const localInfluence = Math.exp(-Math.pow(x / (ballRadius * 1.85), 2));
+        const symmetricDeflect =
+          sideSign * radialInfluence * (ballRadius * (0.45 + flowStrength * 0.24));
+        // Magnus asymmetry: with-flow side pinches inward; against-flow side bulges outward.
+        const magnusAsym = sideSign * pressureFactor * localInfluence * Math.abs(ny)
+          * (ballRadius * spinStrength * 0.45);
         const wakeInfluence = x > 0
-          ? Math.exp(-Math.pow((x - ballRadius * 0.6) / (ballRadius * 3.2), 2))
+          ? Math.exp(-Math.pow((x - ballRadius * 0.55) / (ballRadius * 2.8), 2))
           : 0;
-        const wakeCurl = wakeInfluence * Math.sin((x / (ballRadius * 0.95)) + i * 0.55) * (2.1 + flowStrength * 2.8);
-        const magnusShift = spinSign * spinStrength * localInfluence * (-ny) * (ballRadius * 0.38);
-        const y = y0 + deflectAroundBall + wakeCurl + magnusShift;
-        pathParts.push(`${(BALL_CX + x).toFixed(1)},${(BALL_CY + y).toFixed(1)}`);
+        const wakeCurl = wakeInfluence
+          * Math.sin((x / (ballRadius * 0.9)) + i * 0.55)
+          * (2 + flowStrength * 2.4);
+        const wakeBias = spinRatio * wakeInfluence * (ballRadius * 0.18);
+        const y = y0 + symmetricDeflect + magnusAsym + wakeCurl + wakeBias;
+        pathParts.push(`${(centerX + x).toFixed(1)},${(centerY + y).toFixed(1)}`);
       }
       lines.push(`M ${pathParts[0]} L ${pathParts.slice(1).join(" L ")}`);
     }
     return lines;
-  }, [ballRadius, spinRPM, spinRatio, velocityX, velocityY]);
+  }, [ballRadius, centerX, centerY, spinRatio, velocityX, velocityY, svgWidth, vizHeight]);
 
-  const vectorMinLength = 18;
-  const vectorMaxLength = 76;
-  const velocityVector = scaleVector(velocityX, -velocityY, 0.78, vectorMinLength, vectorMaxLength);
+  const vectorMinLength = Math.max(16, Math.min(svgWidth, vizHeight) * 0.1);
+  const vectorMaxLength = Math.min(svgWidth, vizHeight) * 0.34;
+  const velocityVector = scaleVector(velocityX, -velocityY, 0.85, vectorMinLength, vectorMaxLength);
   const dragVector = scaleVector(dragX, -dragY, 28, vectorMinLength, vectorMaxLength);
   const magnusVector = scaleVector(magnusX, -magnusY, 28, vectorMinLength, vectorMaxLength);
   const gravityVector = scaleVector(gravityX, -gravityY, 28, vectorMinLength, vectorMaxLength);
-  const velocityArrow = buildArrowPath(BALL_CX, BALL_CY, velocityVector.dx, velocityVector.dy);
-  const dragArrow = buildArrowPath(BALL_CX, BALL_CY, dragVector.dx, dragVector.dy);
-  const magnusArrow = buildArrowPath(BALL_CX, BALL_CY, magnusVector.dx, magnusVector.dy);
-  const gravityArrow = buildArrowPath(BALL_CX, BALL_CY, gravityVector.dx, gravityVector.dy);
+  const velocityArrow = buildArrowPath(centerX, centerY, velocityVector.dx, velocityVector.dy);
+  const dragArrow = buildArrowPath(centerX, centerY, dragVector.dx, dragVector.dy);
+  const magnusArrow = buildArrowPath(centerX, centerY, magnusVector.dx, magnusVector.dy);
+  const gravityArrow = buildArrowPath(centerX, centerY, gravityVector.dx, gravityVector.dy);
+
   const pressureStrength = densityRatio * clamp(Math.abs(spinRatio) * 2.4, 0.12, 1);
   const topPressureColor = Math.abs(spinRPM) < 0.5
-    ? `rgba(125,211,252,${(0.22 * pressureStrength).toFixed(3)})`
+    ? `rgba(125,211,252,${(0.18 * pressureStrength).toFixed(3)})`
     : spinRPM >= 0
-      ? `rgba(59,130,246,${(0.42 * pressureStrength).toFixed(3)})`
-      : `rgba(239,68,68,${(0.42 * pressureStrength).toFixed(3)})`;
+      ? `rgba(59,130,246,${(0.4 * pressureStrength).toFixed(3)})`
+      : `rgba(239,68,68,${(0.4 * pressureStrength).toFixed(3)})`;
   const bottomPressureColor = Math.abs(spinRPM) < 0.5
-    ? `rgba(125,211,252,${(0.22 * pressureStrength).toFixed(3)})`
+    ? `rgba(125,211,252,${(0.18 * pressureStrength).toFixed(3)})`
     : spinRPM >= 0
-      ? `rgba(239,68,68,${(0.4 * pressureStrength).toFixed(3)})`
-      : `rgba(59,130,246,${(0.42 * pressureStrength).toFixed(3)})`;
+      ? `rgba(239,68,68,${(0.38 * pressureStrength).toFixed(3)})`
+      : `rgba(59,130,246,${(0.4 * pressureStrength).toFixed(3)})`;
   const ballFill = ballType === "cannonball" ? "#6b7280" : ballType === "pingPong" ? "#fde68a" : "#f8fafc";
+  const displayedRotationDeg = Math.abs(spinRPM) < 0.01 ? 0 : rotationDeg;
+
+  const toggleVector = (key: VectorKey) => {
+    setVisibleVectors((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   return (
     <div
       style={{
-        width: VIEW_WIDTH,
-        borderRadius: 14,
-        background: "linear-gradient(160deg, rgba(15,23,42,0.88), rgba(30,41,59,0.82))",
-        backdropFilter: "blur(2px)",
-        boxShadow: "0 10px 24px rgba(15,23,42,0.35)",
-        border: "1px solid rgba(148,163,184,0.25)",
+        position: "fixed",
+        left: position.x,
+        top: position.y,
+        width: size.width,
+        height: panelHeight,
+        borderRadius: 16,
+        background: "linear-gradient(165deg, rgba(15,23,42,0.46), rgba(30,41,59,0.36))",
+        backdropFilter: "blur(14px) saturate(1.2)",
+        border: "1px solid rgba(148,163,184,0.35)",
+        boxShadow: "0 16px 36px rgba(2,6,23,0.35)",
         overflow: "hidden",
+        zIndex: 20,
+        userSelect: "none",
       }}
     >
-      <svg width={VIEW_WIDTH} height={VIEW_HEIGHT} viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}>
-        <defs>
-          <radialGradient id="pressureTop" cx="50%" cy="50%" r="55%">
-            <stop offset="0%" stopColor={topPressureColor} />
-            <stop offset="100%" stopColor="rgba(0,0,0,0)" />
-          </radialGradient>
-          <radialGradient id="pressureBottom" cx="50%" cy="50%" r="55%">
-            <stop offset="0%" stopColor={bottomPressureColor} />
-            <stop offset="100%" stopColor="rgba(0,0,0,0)" />
-          </radialGradient>
-        </defs>
-
-        <g transform={`rotate(${flowAngleDeg.toFixed(2)} ${BALL_CX} ${BALL_CY})`}>
-          {streamlines.map((d, idx) => (
-            <path
-              key={`stream-${idx}`}
-              d={d}
-              stroke={`rgba(186,230,253,${(0.9 * densityRatio).toFixed(3)})`}
-              strokeWidth={1.6}
-              fill="none"
-              strokeLinecap="round"
-            />
-          ))}
-        </g>
-
-        <ellipse cx={BALL_CX} cy={BALL_CY - ballRadius * 0.65} rx={ballRadius * 1.45} ry={ballRadius * 0.92} fill="url(#pressureTop)" />
-        <ellipse cx={BALL_CX} cy={BALL_CY + ballRadius * 0.68} rx={ballRadius * 1.45} ry={ballRadius * 0.92} fill="url(#pressureBottom)" />
-
-        <circle cx={BALL_CX} cy={BALL_CY} r={ballRadius} fill={ballFill} stroke="rgba(15,23,42,0.7)" strokeWidth={2} />
-        <g transform={`rotate(${displayedRotationDeg.toFixed(2)} ${BALL_CX} ${BALL_CY})`}>
-          <SeamTexture ballType={ballType} />
-        </g>
-        <circle cx={BALL_CX - ballRadius * 0.26} cy={BALL_CY - ballRadius * 0.3} r={ballRadius * 0.2} fill="rgba(255,255,255,0.4)" />
-        {velocityArrow.length > 0 && (
-          <path d={velocityArrow} stroke="#22c55e" strokeWidth={2} fill="none" strokeLinecap="round" />
-        )}
-        {dragArrow.length > 0 && (
-          <path d={dragArrow} stroke="#ef4444" strokeWidth={2} fill="none" strokeLinecap="round" />
-        )}
-        {magnusArrow.length > 0 && (
-          <path d={magnusArrow} stroke="#a855f7" strokeWidth={2} fill="none" strokeLinecap="round" />
-        )}
-        {gravityArrow.length > 0 && (
-          <path d={gravityArrow} stroke="#3b82f6" strokeWidth={2} fill="none" strokeLinecap="round" />
-        )}
-      </svg>
-
       <div
+        onPointerDown={(event) => {
+          if (event.target instanceof HTMLElement && event.target.closest("button")) {
+            return;
+          }
+          beginDrag(event);
+        }}
         style={{
-          padding: "0.45rem 0.65rem 0.55rem",
-          borderTop: "1px solid rgba(148,163,184,0.25)",
-          color: "#e2e8f0",
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-          fontSize: "0.73rem",
-          lineHeight: 1.4,
-          background: "rgba(2,6,23,0.55)",
+          height: HEADER_HEIGHT,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 0.65rem 0 0.7rem",
+          borderBottom: "1px solid rgba(148,163,184,0.32)",
+          cursor: "grab",
+          background: "rgba(15,23,42,0.35)",
         }}
       >
-        <div style={{ fontWeight: 700, marginBottom: "0.2rem", color: "#f8fafc" }}>
-          Physics Microscope · {describeBall(ballType)}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", minWidth: 0 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22d3ee", flexShrink: 0 }} />
+          <span style={{ color: "#f8fafc", fontWeight: 700, fontSize: "0.78rem", letterSpacing: "0.02em" }}>
+            Physics Dashboard
+          </span>
+          <span style={{ color: "#cbd5e1", fontSize: "0.68rem" }}>{describeBall(ballType)}</span>
         </div>
-        <div>Velocity: {velocity.toFixed(2)} m/s</div>
-        <div>Magnus Lift: {magnusLiftN.toFixed(3)} N</div>
-        <div>Spin Ratio (ωr/v): {spinRatio.toFixed(3)}</div>
-        <div>Air Density: {airDensity.toFixed(3)} kg/m³</div>
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          style={{
+            border: "1px solid rgba(148,163,184,0.45)",
+            background: "rgba(15,23,42,0.4)",
+            color: "#e2e8f0",
+            borderRadius: 6,
+            fontSize: "0.68rem",
+            padding: "0.15rem 0.42rem",
+            cursor: "pointer",
+          }}
+        >
+          {expanded ? "Collapse" : "Expand"}
+        </button>
       </div>
+      {expanded && (
+        <>
+          <svg width="100%" height={vizHeight} viewBox={`0 0 ${svgWidth} ${vizHeight}`} preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <radialGradient id={`${gradientsId}-top`} cx="50%" cy="50%" r="55%">
+                <stop offset="0%" stopColor={topPressureColor} />
+                <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+              </radialGradient>
+              <radialGradient id={`${gradientsId}-bottom`} cx="50%" cy="50%" r="55%">
+                <stop offset="0%" stopColor={bottomPressureColor} />
+                <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+              </radialGradient>
+            </defs>
+
+            <g transform={`rotate(${flowAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
+              {streamlines.map((d, idx) => (
+                <path
+                  key={`stream-${idx}`}
+                  d={d}
+                  stroke={`rgba(186,230,253,${(0.9 * densityRatio).toFixed(3)})`}
+                  strokeWidth={1.6}
+                  fill="none"
+                  strokeLinecap="round"
+                />
+              ))}
+            </g>
+
+            <ellipse cx={centerX} cy={centerY - ballRadius * 0.66} rx={ballRadius * 1.45} ry={ballRadius * 0.94} fill={`url(#${gradientsId}-top)`} />
+            <ellipse cx={centerX} cy={centerY + ballRadius * 0.68} rx={ballRadius * 1.45} ry={ballRadius * 0.94} fill={`url(#${gradientsId}-bottom)`} />
+
+            <circle cx={centerX} cy={centerY} r={ballRadius} fill={ballFill} stroke="rgba(15,23,42,0.7)" strokeWidth={2} />
+            <g transform={`rotate(${displayedRotationDeg.toFixed(2)} ${centerX} ${centerY})`}>
+              <SeamTexture ballType={ballType} cx={centerX} cy={centerY} radius={ballRadius} />
+            </g>
+            <circle cx={centerX - ballRadius * 0.26} cy={centerY - ballRadius * 0.28} r={ballRadius * 0.2} fill="rgba(255,255,255,0.4)" />
+
+            {visibleVectors.velocity && velocityArrow.length > 0 && (
+              <path d={velocityArrow} stroke="#22c55e" strokeWidth={2.3} fill="none" strokeLinecap="round" />
+            )}
+            {visibleVectors.drag && dragArrow.length > 0 && (
+              <path d={dragArrow} stroke="#ef4444" strokeWidth={2.3} fill="none" strokeLinecap="round" />
+            )}
+            {visibleVectors.magnus && magnusArrow.length > 0 && (
+              <path d={magnusArrow} stroke="#a855f7" strokeWidth={2.3} fill="none" strokeLinecap="round" />
+            )}
+            {visibleVectors.gravity && gravityArrow.length > 0 && (
+              <path d={gravityArrow} stroke="#3b82f6" strokeWidth={2.3} fill="none" strokeLinecap="round" />
+            )}
+          </svg>
+          <div
+            style={{
+              height: DETAILS_HEIGHT,
+              padding: "0.5rem 0.65rem 0.6rem",
+              borderTop: "1px solid rgba(148,163,184,0.3)",
+              color: "#e2e8f0",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              fontSize: "0.72rem",
+              lineHeight: 1.35,
+              background: "rgba(2,6,23,0.42)",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "0.25rem 0.65rem",
+              alignContent: "start",
+            }}
+          >
+            <div style={{ gridColumn: "1 / span 2", fontWeight: 700, color: "#f8fafc", marginBottom: "0.15rem" }}>
+              Vector Legend (click to toggle)
+            </div>
+            {VECTOR_META.map((meta) => (
+              <button
+                key={meta.key}
+                type="button"
+                onClick={() => toggleVector(meta.key)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.35rem",
+                  borderRadius: 6,
+                  border: `1px solid ${visibleVectors[meta.key] ? meta.color : "rgba(148,163,184,0.35)"}`,
+                  background: visibleVectors[meta.key] ? "rgba(15,23,42,0.45)" : "rgba(30,41,59,0.25)",
+                  color: visibleVectors[meta.key] ? "#f8fafc" : "#94a3b8",
+                  padding: "0.22rem 0.36rem",
+                  fontSize: "0.69rem",
+                  cursor: "pointer",
+                }}
+              >
+                <span style={{ color: meta.color, fontWeight: 800, fontSize: "0.9rem", lineHeight: 1 }}>➤</span>
+                <span>{meta.label}</span>
+              </button>
+            ))}
+            <div style={{ gridColumn: "1 / span 2", marginTop: "0.15rem", color: "#cbd5e1" }}>
+              <div>Velocity: {velocity.toFixed(2)} m/s</div>
+              <div>Magnus Lift: {magnusLiftN.toFixed(3)} N</div>
+              <div>Spin Ratio (ωr/v): {spinRatio.toFixed(3)}</div>
+              <div>Air Density: {airDensity.toFixed(3)} kg/m³</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onPointerDown={beginResize}
+            style={{
+              position: "absolute",
+              right: 4,
+              bottom: 4,
+              width: 24,
+              height: 24,
+              cursor: "nwse-resize",
+              border: "1px solid rgba(148,163,184,0.55)",
+              borderRadius: 6,
+              background: "rgba(30,41,59,0.5)",
+              color: "#cbd5e1",
+              fontSize: "0.8rem",
+              lineHeight: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 3,
+            }}
+            aria-label="Resize physics dashboard"
+            title="Drag to resize"
+          >
+            ↘
+          </button>
+        </>
+      )}
     </div>
   );
 }

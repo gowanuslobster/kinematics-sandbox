@@ -844,31 +844,21 @@ function App() {
             onHoverPointChange={handleManualAnalysisPointChange}
             isAutoSimulating={isChallenge && isAutoScrubbing}
           />
-          <div
-            style={{
-              position: "absolute",
-              right: "1rem",
-              bottom: "1rem",
-              zIndex: 7,
-              pointerEvents: "none",
-            }}
-          >
-            <PhysicsMicroscope
-              velocity={microscopeVelocity}
-              spinRPM={spinRpm}
-              ballType={selectedBallType}
-              airDensity={airDensity}
-              magnusLiftN={microscopeMagnusLift}
-              velocityX={activeAnalysisPoint?.vx ?? defaultVelocityX}
-              velocityY={activeAnalysisPoint?.vy ?? defaultVelocityY}
-              dragX={activeAnalysisPoint?.dragX ?? 0}
-              dragY={activeAnalysisPoint?.dragY ?? 0}
-              magnusX={activeAnalysisPoint?.magnusX ?? 0}
-              magnusY={activeAnalysisPoint?.magnusY ?? 0}
-              gravityX={activeAnalysisPoint?.gravX ?? 0}
-              gravityY={activeAnalysisPoint?.gravY ?? -(mass * gravity)}
-            />
-          </div>
+          <PhysicsMicroscope
+            velocity={microscopeVelocity}
+            spinRPM={spinRpm}
+            ballType={selectedBallType}
+            airDensity={airDensity}
+            magnusLiftN={microscopeMagnusLift}
+            velocityX={activeAnalysisPoint?.vx ?? defaultVelocityX}
+            velocityY={activeAnalysisPoint?.vy ?? defaultVelocityY}
+            dragX={activeAnalysisPoint?.dragX ?? 0}
+            dragY={activeAnalysisPoint?.dragY ?? 0}
+            magnusX={activeAnalysisPoint?.magnusX ?? 0}
+            magnusY={activeAnalysisPoint?.magnusY ?? 0}
+            gravityX={activeAnalysisPoint?.gravX ?? 0}
+            gravityY={activeAnalysisPoint?.gravY ?? -(mass * gravity)}
+          />
         </div>
         <div
           style={{
