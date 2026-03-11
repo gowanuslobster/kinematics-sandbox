@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { AIR_DENSITY_SEA_LEVEL } from "./physics";
 
 export type MicroscopeBallType = "baseball" | "pingPong" | "cannonball" | "custom";
 
@@ -169,46 +170,64 @@ export function PhysicsMicroscope({
   }, [spinRPM]);
   const displayedRotationDeg = Math.abs(spinRPM) < 0.01 ? 0 : rotationDeg;
 
+  const ballRadius = BALL_RADII[ballType];
+  const densityRatio = clamp(airDensity / AIR_DENSITY_SEA_LEVEL, 0, 1);
+  const flowVectorX = Math.abs(velocityX) < 0.01 && Math.abs(velocityY) < 0.01 ? 1 : velocityX;
+  // SVG Y increases downward, so convert physics Y-up velocity to screen-space for angle.
+  const flowVectorY = Math.abs(velocityX) < 0.01 && Math.abs(velocityY) < 0.01 ? 0 : -velocityY;
+  const flowAngleDeg = (Math.atan2(flowVectorY, flowVectorX) * 180) / Math.PI;
   const streamlines = useMemo(() => {
     const lines: string[] = [];
-    const count = 11;
-    const left = 10;
-    const right = VIEW_WIDTH - 10;
+    const count = 12;
+    const xMin = -148;
+    const xMax = 148;
     const spinSign = Math.sign(spinRPM);
-    const spinStrength = clamp(Math.abs(spinRatio) * 2.6, 0, 1.2);
-    const yStart = 30;
-    const yStep = 16;
+    const spinStrength = clamp(Math.abs(spinRatio) * 2.2, 0, 1.4);
+    const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.4);
     for (let i = 0; i < count; i++) {
-      const y0 = yStart + i * yStep;
-      const dy0 = y0 - BALL_CY;
-      const dyNorm = clamp(dy0 / 70, -1, 1);
+      const y0 = ((i / (count - 1)) - 0.5) * 150;
+      const ny = clamp(y0 / 75, -1, 1);
       const pathParts: string[] = [];
-      for (let x = left; x <= right; x += 12) {
-        const influenceX = Math.exp(-Math.pow((x - BALL_CX) / 72, 2));
-        const distortionScale = clamp(1 + spinSign * dyNorm * spinStrength * 0.65, 0.25, 2.4);
-        const yDistorted = BALL_CY + dy0 * distortionScale;
-        const wakeWave = spinSign * spinStrength * influenceX * Math.sin((x - BALL_CX) / 22) * 2.2;
-        const y = y0 * (1 - influenceX) + yDistorted * influenceX + wakeWave;
-        pathParts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+      for (let x = xMin; x <= xMax; x += 12) {
+        const nx = x / (ballRadius * 2.4);
+        const radialInfluence = Math.exp(-(nx * nx + ny * ny) * 1.15);
+        const localInfluence = Math.exp(-Math.pow(x / (ballRadius * 2.1), 2));
+        const deflectAroundBall =
+          Math.sign(y0 === 0 ? 1 : y0) * radialInfluence * (ballRadius * (0.48 + flowStrength * 0.22));
+        const wakeInfluence = x > 0
+          ? Math.exp(-Math.pow((x - ballRadius * 0.6) / (ballRadius * 3.2), 2))
+          : 0;
+        const wakeCurl = wakeInfluence * Math.sin((x / (ballRadius * 0.95)) + i * 0.55) * (2.1 + flowStrength * 2.8);
+        const magnusShift = spinSign * spinStrength * localInfluence * (-ny) * (ballRadius * 0.38);
+        const y = y0 + deflectAroundBall + wakeCurl + magnusShift;
+        pathParts.push(`${(BALL_CX + x).toFixed(1)},${(BALL_CY + y).toFixed(1)}`);
       }
       lines.push(`M ${pathParts[0]} L ${pathParts.slice(1).join(" L ")}`);
     }
     return lines;
-  }, [spinRPM, spinRatio]);
+  }, [ballRadius, spinRPM, spinRatio, velocityX, velocityY]);
 
-  const ballRadius = BALL_RADII[ballType];
-  const vectorMinLength = 10;
-  const vectorMaxLength = 48;
-  const velocityVector = scaleVector(velocityX, velocityY, 0.25, vectorMinLength, vectorMaxLength);
-  const dragVector = scaleVector(dragX, dragY, 1.6, vectorMinLength, vectorMaxLength);
-  const magnusVector = scaleVector(magnusX, magnusY, 1.6, vectorMinLength, vectorMaxLength);
-  const gravityVector = scaleVector(gravityX, gravityY, 1.6, vectorMinLength, vectorMaxLength);
+  const vectorMinLength = 18;
+  const vectorMaxLength = 76;
+  const velocityVector = scaleVector(velocityX, -velocityY, 0.78, vectorMinLength, vectorMaxLength);
+  const dragVector = scaleVector(dragX, -dragY, 28, vectorMinLength, vectorMaxLength);
+  const magnusVector = scaleVector(magnusX, -magnusY, 28, vectorMinLength, vectorMaxLength);
+  const gravityVector = scaleVector(gravityX, -gravityY, 28, vectorMinLength, vectorMaxLength);
   const velocityArrow = buildArrowPath(BALL_CX, BALL_CY, velocityVector.dx, velocityVector.dy);
   const dragArrow = buildArrowPath(BALL_CX, BALL_CY, dragVector.dx, dragVector.dy);
   const magnusArrow = buildArrowPath(BALL_CX, BALL_CY, magnusVector.dx, magnusVector.dy);
   const gravityArrow = buildArrowPath(BALL_CX, BALL_CY, gravityVector.dx, gravityVector.dy);
-  const topPressureColor = spinRPM >= 0 ? "rgba(59,130,246,0.35)" : "rgba(239,68,68,0.35)";
-  const bottomPressureColor = spinRPM >= 0 ? "rgba(239,68,68,0.33)" : "rgba(59,130,246,0.35)";
+  const pressureStrength = densityRatio * clamp(Math.abs(spinRatio) * 2.4, 0.12, 1);
+  const topPressureColor = Math.abs(spinRPM) < 0.5
+    ? `rgba(125,211,252,${(0.22 * pressureStrength).toFixed(3)})`
+    : spinRPM >= 0
+      ? `rgba(59,130,246,${(0.42 * pressureStrength).toFixed(3)})`
+      : `rgba(239,68,68,${(0.42 * pressureStrength).toFixed(3)})`;
+  const bottomPressureColor = Math.abs(spinRPM) < 0.5
+    ? `rgba(125,211,252,${(0.22 * pressureStrength).toFixed(3)})`
+    : spinRPM >= 0
+      ? `rgba(239,68,68,${(0.4 * pressureStrength).toFixed(3)})`
+      : `rgba(59,130,246,${(0.42 * pressureStrength).toFixed(3)})`;
   const ballFill = ballType === "cannonball" ? "#6b7280" : ballType === "pingPong" ? "#fde68a" : "#f8fafc";
 
   return (
@@ -235,16 +254,18 @@ export function PhysicsMicroscope({
           </radialGradient>
         </defs>
 
-        {streamlines.map((d, idx) => (
-          <path
-            key={`stream-${idx}`}
-            d={d}
-            stroke="rgba(186,230,253,0.85)"
-            strokeWidth={1.5}
-            fill="none"
-            strokeLinecap="round"
-          />
-        ))}
+        <g transform={`rotate(${flowAngleDeg.toFixed(2)} ${BALL_CX} ${BALL_CY})`}>
+          {streamlines.map((d, idx) => (
+            <path
+              key={`stream-${idx}`}
+              d={d}
+              stroke={`rgba(186,230,253,${(0.9 * densityRatio).toFixed(3)})`}
+              strokeWidth={1.6}
+              fill="none"
+              strokeLinecap="round"
+            />
+          ))}
+        </g>
 
         <ellipse cx={BALL_CX} cy={BALL_CY - ballRadius * 0.65} rx={ballRadius * 1.45} ry={ballRadius * 0.92} fill="url(#pressureTop)" />
         <ellipse cx={BALL_CX} cy={BALL_CY + ballRadius * 0.68} rx={ballRadius * 1.45} ry={ballRadius * 0.92} fill="url(#pressureBottom)" />

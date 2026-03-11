@@ -207,6 +207,9 @@ function App() {
   }, [mode, challengeShot, points]);
 
   const displayHit = mode === "live" ? hit : (challengeComplete && challengeShot ? challengeShot.hit : false);
+  const launchAngleRad = (launchAngle * Math.PI) / 180;
+  const defaultVelocityX = Math.max(initialVelocity, 0) * Math.cos(launchAngleRad);
+  const defaultVelocityY = Math.max(initialVelocity, 0) * Math.sin(launchAngleRad);
   const microscopeVelocity = activeAnalysisPoint
     ? Math.hypot(activeAnalysisPoint.vx, activeAnalysisPoint.vy)
     : Math.max(initialVelocity, 0);
@@ -856,8 +859,8 @@ function App() {
               ballType={selectedBallType}
               airDensity={airDensity}
               magnusLiftN={microscopeMagnusLift}
-              velocityX={activeAnalysisPoint?.vx ?? 0}
-              velocityY={activeAnalysisPoint?.vy ?? 0}
+              velocityX={activeAnalysisPoint?.vx ?? defaultVelocityX}
+              velocityY={activeAnalysisPoint?.vy ?? defaultVelocityY}
               dragX={activeAnalysisPoint?.dragX ?? 0}
               dragY={activeAnalysisPoint?.dragY ?? 0}
               magnusX={activeAnalysisPoint?.magnusX ?? 0}

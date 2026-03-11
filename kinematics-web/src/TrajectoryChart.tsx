@@ -47,7 +47,7 @@ interface PlotShape {
 const VECTOR_SCALE = 0.25;
 const FORCE_SCALE_MULTIPLIER = 18;
 const PLOT_MARGIN = { t: 24, r: 24, b: 40, l: 48 };
-const HOVER_DISTANCE_PX = 120;
+const HOVER_DISTANCE_PX = 24;
 
 function vectorMagnitude(x: number, y: number): number {
   return Math.hypot(x, y);
@@ -202,20 +202,7 @@ export function TrajectoryChart({
     mode: "lines",
     line: { shape: "spline", color: trajectoryColor, width: 2 },
     name: "Current trajectory",
-    customdata: points.map((_, idx) => idx),
-    hovertemplate: "<extra></extra>",
-  });
-
-  data.push({
-    x,
-    y,
-    type: "scatter",
-    mode: "lines",
-    line: { color: "rgba(99,102,241,0.001)", width: 60 },
-    name: "Hover capture",
-    showlegend: false,
-    customdata: points.map((_, idx) => idx),
-    hovertemplate: "<extra></extra>",
+    hoverinfo: "skip",
   });
 
   if (analysisPoint) {
