@@ -106,6 +106,28 @@ function buildArrowPath(cx: number, cy: number, dx: number, dy: number): string 
   return `M ${cx},${cy} L ${tx},${ty} M ${tx},${ty} L ${leftX},${leftY} M ${tx},${ty} L ${rightX},${rightY}`;
 }
 
+interface Point {
+  x: number;
+  y: number;
+}
+
+function buildCubicBezierPath(points: Point[]): string {
+  if (points.length < 2) return "";
+  let d = `M ${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[Math.min(points.length - 1, i + 2)];
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+
 function SeamTexture({
   ballType,
   cx,
@@ -335,44 +357,64 @@ export function PhysicsMicroscope({
   const flowAngleDeg = (Math.atan2(flowVectorY, flowVectorX) * 180) / Math.PI;
 
   const streamlines = useMemo(() => {
-    const lines: string[] = [];
-    const count = clamp(Math.round(vizHeight / 18), 9, 16);
+    const lines: Array<{ id: string; main: string; wake: string; alpha: number }> = [];
+    const count = clamp(Math.round(vizHeight / 18), 10, 18);
     const xMin = -svgWidth * 0.48;
     const xMax = svgWidth * 0.48;
-    const withFlowSide = spinRatio >= 0 ? -1 : 1;
-    const spinStrength = clamp(Math.abs(spinRatio) * 2.2, 0, 1.4);
+    const frontX = -ballRadius * 1.1;
+    const rearX = ballRadius * 1.05;
+    const withFlowSide = spinRatio >= 0 ? -1 : 1; // backspin+: top, topspin-: bottom
+    const againstFlowSide = -withFlowSide;
+    const spinStrength = clamp(Math.abs(spinRatio) * 2.2, 0, 1.45);
     const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.5);
-    const ySpread = Math.max(90, vizHeight * 0.74);
-    const step = Math.max(8, Math.round(svgWidth / 30));
+    const ySpread = Math.max(100, vizHeight * 0.76);
+    const sampleStep = Math.max(8, Math.round(svgWidth / 34));
     for (let i = 0; i < count; i++) {
-      const y0 = ((i / (count - 1)) - 0.5) * ySpread;
-      const ny = clamp(y0 / (ySpread * 0.5), -1, 1);
-      const sideSign = Math.sign(y0 === 0 ? 1 : y0);
-      const pressureFactor = sideSign === withFlowSide ? -1 : 1;
-      const pathParts: string[] = [];
-      for (let x = xMin; x <= xMax; x += step) {
-        const nx = x / (ballRadius * 2.8);
-        const radialInfluence = Math.exp(-(nx * nx + ny * ny) * 1.2);
-        const localInfluence = Math.exp(-Math.pow(x / (ballRadius * 1.85), 2));
-        const symmetricDeflect =
-          sideSign * radialInfluence * (ballRadius * (0.45 + flowStrength * 0.24));
-        // Magnus asymmetry: with-flow side pinches inward; against-flow side bulges outward.
-        const magnusAsym = sideSign * pressureFactor * localInfluence * Math.abs(ny)
-          * (ballRadius * spinStrength * 0.45);
-        const wakeInfluence = x > 0
-          ? Math.exp(-Math.pow((x - ballRadius * 0.55) / (ballRadius * 2.8), 2))
-          : 0;
-        const wakeCurl = wakeInfluence
-          * Math.sin((x / (ballRadius * 0.9)) + i * 0.55)
-          * (2 + flowStrength * 2.4);
-        const wakeBias = spinRatio * wakeInfluence * (ballRadius * 0.18);
-        const y = y0 + symmetricDeflect + magnusAsym + wakeCurl + wakeBias;
-        pathParts.push(`${(centerX + x).toFixed(1)},${(centerY + y).toFixed(1)}`);
+      const yBase = ((i / (count - 1)) - 0.5) * ySpread;
+      const sideSign = Math.sign(yBase === 0 ? withFlowSide : yBase);
+      const absYNorm = clamp(Math.abs(yBase) / (ySpread * 0.55), 0, 1);
+      const bandInfluence = Math.exp(-Math.pow(absYNorm * 1.5, 2));
+      const withFlowBand = sideSign === withFlowSide ? 1 : 0;
+      const againstFlowBand = sideSign === againstFlowSide ? 1 : 0;
+      const mainPoints: Point[] = [];
+      const wakePoints: Point[] = [];
+      for (let x = xMin; x <= rearX; x += sampleStep) {
+        const xNorm = x / (ballRadius * 2.1);
+        const nearBall = Math.exp(-Math.pow(xNorm, 2));
+        const frontInfluence = Math.exp(-Math.pow((x - frontX) / (ballRadius * 1.1), 2));
+        const rearInfluence = Math.exp(-Math.pow((x - rearX) / (ballRadius * 1.3), 2));
+        // Red stagnation region: streamlines split around the front hemisphere.
+        const frontDivergence = sideSign * frontInfluence * (ballRadius * (0.24 + 0.24 * flowStrength));
+        // Magnus asymmetry: with-flow side bunches, against-flow side spreads.
+        const magnusCompression = withFlowBand * nearBall * (ballRadius * spinStrength * 0.28);
+        const magnusExpansion = againstFlowBand * nearBall * (ballRadius * spinStrength * 0.3);
+        // Spin drags nearby fluid around the with-flow side.
+        const circulationDrag = withFlowSide * nearBall * bandInfluence * (ballRadius * spinStrength * 0.16);
+        const rearConvergence = -sideSign * rearInfluence * (ballRadius * (0.1 + 0.16 * flowStrength));
+        const y = yBase + frontDivergence - sideSign * magnusCompression + sideSign * magnusExpansion
+          + circulationDrag + rearConvergence;
+        mainPoints.push({ x: centerX + x, y: centerY + y });
       }
-      lines.push(`M ${pathParts[0]} L ${pathParts.slice(1).join(" L ")}`);
+      for (let x = rearX; x <= xMax; x += sampleStep) {
+        const wakeNorm = clamp((x - rearX) / Math.max(1, (xMax - rearX)), 0, 1);
+        const wakeBlend = Math.exp(-wakeNorm * 2.1);
+        const wakeConverge = -sideSign * wakeBlend * (ballRadius * (0.22 + 0.15 * flowStrength));
+        const wakeWobble = Math.sin((x / (ballRadius * 0.9)) + i * 0.72) * (0.65 + flowStrength * 1.25)
+          * wakeNorm * (0.6 + 0.8 * densityRatio);
+        const sideBias = withFlowSide * spinStrength * wakeBlend * (ballRadius * 0.09);
+        const y = yBase + wakeConverge + wakeWobble + sideBias;
+        wakePoints.push({ x: centerX + x, y: centerY + y });
+      }
+      const alpha = clamp((0.38 + (1 - absYNorm) * 0.62) * densityRatio, 0.1, 1);
+      lines.push({
+        id: `line-${i}`,
+        main: buildCubicBezierPath(mainPoints),
+        wake: buildCubicBezierPath(wakePoints),
+        alpha,
+      });
     }
     return lines;
-  }, [ballRadius, centerX, centerY, spinRatio, velocityX, velocityY, svgWidth, vizHeight]);
+  }, [ballRadius, centerX, centerY, densityRatio, spinRatio, velocityX, velocityY, svgWidth, vizHeight]);
 
   const vectorMinLength = Math.max(16, Math.min(svgWidth, vizHeight) * 0.1);
   const vectorMaxLength = Math.min(svgWidth, vizHeight) * 0.34;
@@ -385,17 +427,18 @@ export function PhysicsMicroscope({
   const magnusArrow = buildArrowPath(centerX, centerY, magnusVector.dx, magnusVector.dy);
   const gravityArrow = buildArrowPath(centerX, centerY, gravityVector.dx, gravityVector.dy);
 
-  const pressureStrength = densityRatio * clamp(Math.abs(spinRatio) * 2.4, 0.12, 1);
-  const topPressureColor = Math.abs(spinRPM) < 0.5
-    ? `rgba(125,211,252,${(0.18 * pressureStrength).toFixed(3)})`
-    : spinRPM >= 0
-      ? `rgba(59,130,246,${(0.4 * pressureStrength).toFixed(3)})`
-      : `rgba(239,68,68,${(0.4 * pressureStrength).toFixed(3)})`;
-  const bottomPressureColor = Math.abs(spinRPM) < 0.5
-    ? `rgba(125,211,252,${(0.18 * pressureStrength).toFixed(3)})`
-    : spinRPM >= 0
-      ? `rgba(239,68,68,${(0.38 * pressureStrength).toFixed(3)})`
-      : `rgba(59,130,246,${(0.4 * pressureStrength).toFixed(3)})`;
+  const dragStrength = clamp((Math.hypot(velocityX, velocityY) / 45) * densityRatio, 0, 1);
+  const magnusStrength = clamp(Math.abs(spinRatio) * 1.9 * densityRatio, 0, 1);
+  const withFlowSide = spinRatio >= 0 ? -1 : 1;
+  const againstFlowSide = -withFlowSide;
+  const pressureFrontRedAlpha = clamp(0.06 + dragStrength * 0.12, 0.08, 0.18);
+  const pressureWakeBlueAlpha = clamp(0.05 + dragStrength * 0.11, 0.07, 0.18);
+  const pressureSpinRedAlpha = clamp(0.04 + magnusStrength * 0.12, 0.06, 0.18);
+  const pressureSpinBlueAlpha = clamp(0.04 + magnusStrength * 0.12, 0.06, 0.18);
+  const frontRedColor = `rgba(239,68,68,${pressureFrontRedAlpha.toFixed(3)})`;
+  const wakeBlueColor = `rgba(59,130,246,${pressureWakeBlueAlpha.toFixed(3)})`;
+  const spinRedColor = `rgba(239,68,68,${pressureSpinRedAlpha.toFixed(3)})`;
+  const spinBlueColor = `rgba(59,130,246,${pressureSpinBlueAlpha.toFixed(3)})`;
   const ballFill = ballType === "cannonball" ? "#6b7280" : ballType === "pingPong" ? "#fde68a" : "#f8fafc";
   const displayedRotationDeg = Math.abs(spinRPM) < 0.01 ? 0 : rotationDeg;
 
@@ -466,31 +509,49 @@ export function PhysicsMicroscope({
         <>
           <svg width="100%" height={vizHeight} viewBox={`0 0 ${svgWidth} ${vizHeight}`} preserveAspectRatio="xMidYMid meet">
             <defs>
-              <radialGradient id={`${gradientsId}-top`} cx="50%" cy="50%" r="55%">
-                <stop offset="0%" stopColor={topPressureColor} />
+              <radialGradient id={`${gradientsId}-front-red`} cx="50%" cy="50%" r="55%">
+                <stop offset="0%" stopColor={frontRedColor} />
                 <stop offset="100%" stopColor="rgba(0,0,0,0)" />
               </radialGradient>
-              <radialGradient id={`${gradientsId}-bottom`} cx="50%" cy="50%" r="55%">
-                <stop offset="0%" stopColor={bottomPressureColor} />
+              <radialGradient id={`${gradientsId}-wake-blue`} cx="50%" cy="50%" r="60%">
+                <stop offset="0%" stopColor={wakeBlueColor} />
+                <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+              </radialGradient>
+              <radialGradient id={`${gradientsId}-spin-red`} cx="50%" cy="50%" r="58%">
+                <stop offset="0%" stopColor={spinRedColor} />
+                <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+              </radialGradient>
+              <radialGradient id={`${gradientsId}-spin-blue`} cx="50%" cy="50%" r="58%">
+                <stop offset="0%" stopColor={spinBlueColor} />
                 <stop offset="100%" stopColor="rgba(0,0,0,0)" />
               </radialGradient>
             </defs>
 
             <g transform={`rotate(${flowAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
-              {streamlines.map((d, idx) => (
-                <path
-                  key={`stream-${idx}`}
-                  d={d}
-                  stroke={`rgba(186,230,253,${(0.9 * densityRatio).toFixed(3)})`}
-                  strokeWidth={1.6}
-                  fill="none"
-                  strokeLinecap="round"
-                />
+              <ellipse cx={centerX - ballRadius * 1.08} cy={centerY} rx={ballRadius * 1.24} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />
+              <ellipse cx={centerX + ballRadius * 1.34} cy={centerY} rx={ballRadius * 1.72} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
+              <ellipse cx={centerX - ballRadius * 0.24} cy={centerY + againstFlowSide * ballRadius * 0.72} rx={ballRadius * 1.14} ry={ballRadius * 0.88} fill={`url(#${gradientsId}-spin-red)`} />
+              <ellipse cx={centerX + ballRadius * 0.34} cy={centerY + withFlowSide * ballRadius * 0.72} rx={ballRadius * 1.2} ry={ballRadius * 0.92} fill={`url(#${gradientsId}-spin-blue)`} />
+              {streamlines.map((line) => (
+                <g key={line.id}>
+                  <path
+                    d={line.main}
+                    stroke={`rgba(186,230,253,${(0.9 * line.alpha).toFixed(3)})`}
+                    strokeWidth={1.55}
+                    fill="none"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d={line.wake}
+                    stroke={`rgba(186,230,253,${(0.58 * line.alpha).toFixed(3)})`}
+                    strokeWidth={1.45}
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeDasharray="5 6"
+                  />
+                </g>
               ))}
             </g>
-
-            <ellipse cx={centerX} cy={centerY - ballRadius * 0.66} rx={ballRadius * 1.45} ry={ballRadius * 0.94} fill={`url(#${gradientsId}-top)`} />
-            <ellipse cx={centerX} cy={centerY + ballRadius * 0.68} rx={ballRadius * 1.45} ry={ballRadius * 0.94} fill={`url(#${gradientsId}-bottom)`} />
 
             <circle cx={centerX} cy={centerY} r={ballRadius} fill={ballFill} stroke="rgba(15,23,42,0.7)" strokeWidth={2} />
             <g transform={`rotate(${displayedRotationDeg.toFixed(2)} ${centerX} ${centerY})`}>
