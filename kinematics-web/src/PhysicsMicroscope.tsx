@@ -391,9 +391,21 @@ export function PhysicsMicroscope({
         // Spin drags nearby fluid around the with-flow side.
         const circulationDrag = withFlowSide * nearBall * bandInfluence * (ballRadius * spinStrength * 0.16);
         const rearConvergence = -sideSign * rearInfluence * (ballRadius * (0.1 + 0.16 * flowStrength));
-        const y = yBase + frontDivergence - sideSign * magnusCompression + sideSign * magnusExpansion
+        const squeezeFactor = 1
+          - withFlowBand * spinStrength * 0.34 * nearBall
+          + againstFlowBand * spinStrength * 0.26 * nearBall;
+        let yLocal = (yBase * squeezeFactor) + frontDivergence - sideSign * magnusCompression + sideSign * magnusExpansion
           + circulationDrag + rearConvergence;
-        mainPoints.push({ x: centerX + x, y: centerY + y });
+        const clearance = ballRadius + 6;
+        const nearCore = Math.abs(x) <= ballRadius * 0.95;
+        if (nearCore) {
+          const adjustedSign = Math.sign(yLocal === 0 ? sideSign : yLocal);
+          const absDist = Math.abs(yLocal);
+          if (absDist < clearance) {
+            yLocal = adjustedSign * clearance;
+          }
+        }
+        mainPoints.push({ x: centerX + x, y: centerY + yLocal });
       }
       for (let x = rearX; x <= xMax; x += sampleStep) {
         const wakeNorm = clamp((x - rearX) / Math.max(1, (xMax - rearX)), 0, 1);
@@ -405,7 +417,7 @@ export function PhysicsMicroscope({
         const y = yBase + wakeConverge + wakeWobble + sideBias;
         wakePoints.push({ x: centerX + x, y: centerY + y });
       }
-      const alpha = clamp((0.38 + (1 - absYNorm) * 0.62) * densityRatio, 0.1, 1);
+      const alpha = clamp((0.36 + (1 - absYNorm) * 0.6) * densityRatio, 0.1, 1);
       lines.push({
         id: `line-${i}`,
         main: buildCubicBezierPath(mainPoints),
@@ -431,10 +443,10 @@ export function PhysicsMicroscope({
   const magnusStrength = clamp(Math.abs(spinRatio) * 1.9 * densityRatio, 0, 1);
   const withFlowSide = spinRatio >= 0 ? -1 : 1;
   const againstFlowSide = -withFlowSide;
-  const pressureFrontRedAlpha = clamp(0.06 + dragStrength * 0.12, 0.08, 0.18);
-  const pressureWakeBlueAlpha = clamp(0.05 + dragStrength * 0.11, 0.07, 0.18);
-  const pressureSpinRedAlpha = clamp(0.04 + magnusStrength * 0.12, 0.06, 0.18);
-  const pressureSpinBlueAlpha = clamp(0.04 + magnusStrength * 0.12, 0.06, 0.18);
+  const pressureFrontRedAlpha = clamp(0.26 + dragStrength * 0.16, 0.3, 0.4);
+  const pressureWakeBlueAlpha = clamp(0.24 + dragStrength * 0.16, 0.3, 0.4);
+  const pressureSpinRedAlpha = clamp(0.22 + magnusStrength * 0.18, 0.28, 0.4);
+  const pressureSpinBlueAlpha = clamp(0.22 + magnusStrength * 0.18, 0.28, 0.4);
   const frontRedColor = `rgba(239,68,68,${pressureFrontRedAlpha.toFixed(3)})`;
   const wakeBlueColor = `rgba(59,130,246,${pressureWakeBlueAlpha.toFixed(3)})`;
   const spinRedColor = `rgba(239,68,68,${pressureSpinRedAlpha.toFixed(3)})`;
@@ -543,11 +555,10 @@ export function PhysicsMicroscope({
                   />
                   <path
                     d={line.wake}
-                    stroke={`rgba(186,230,253,${(0.58 * line.alpha).toFixed(3)})`}
+                    stroke={`rgba(186,230,253,${(0.5 * line.alpha).toFixed(3)})`}
                     strokeWidth={1.45}
                     fill="none"
                     strokeLinecap="round"
-                    strokeDasharray="5 6"
                   />
                 </g>
               ))}
