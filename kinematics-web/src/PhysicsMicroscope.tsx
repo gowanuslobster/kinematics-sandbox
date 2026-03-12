@@ -369,23 +369,41 @@ export function PhysicsMicroscope({
     const withFlowSide = spinRatio >= 0 ? -1 : 1; // backspin+: top, topspin-: bottom
     const spinStrength = clamp(Math.abs(spinRatio) * 2.2, 0, 1.4);
     const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.5);
-    const yClearance = ballRadius * 1.05;
-    const pinchEffect = ballRadius * clamp(Math.abs(spinRatio) * 0.34, 0, 0.5);
+    const pinchEffect = ballRadius * clamp(Math.abs(spinRatio) * 0.55, 0, 0.5);
     const ySpread = Math.max(100, vizHeight * 0.76);
     const sampleStep = Math.max(8, Math.round(svgWidth / 36));
     const entrySideX = isMovingRight ? xMax : xMin;
     const exitSideX = isMovingRight ? xMin : xMax;
     const entryDir = entrySideX > 0 ? -1 : 1;
     const wakeDir = exitSideX > 0 ? 1 : -1;
-    const wakeBaseDecay = 2.2 + flowStrength * 1.05;
 
     for (let i = 0; i < count; i++) {
       const yBase = ((i / (count - 1)) - 0.5) * ySpread;
       const yBaseSign = Math.sign(Math.abs(yBase) < 1e-6 ? withFlowSide : yBase);
       const absYNorm = clamp(Math.abs(yBase) / (ySpread * 0.55), 0, 1);
-      const withFlowBand = yBaseSign === withFlowSide ? 1 : 0;
-      const maxDeflection = (yBaseSign * yClearance - yBase) * Math.exp(-Math.pow(yBase / (ballRadius * 1.2), 2));
-      const transitionY = yBase + maxDeflection;
+
+      // Determine if this specific line is on the "suction" side (with-flow)
+      const isSuctionSide = (yBaseSign === withFlowSide);
+
+      // PINCH: Pull lines closer together on the suction side to show high velocity/low pressure.
+      // We decay this effect so far outer lines remain perfectly straight.
+      // Positive value pulls lines in (suction side). 
+      // Negative value pushes lines apart (pressure side).
+      const pinchStrength = isSuctionSide 
+        ? clamp(spinStrength * 0.45, 0, 0.6) 
+        : -clamp(spinStrength * 0.4, 0, 0.5);
+      const pinchDecay = Math.exp(-Math.pow(yBase / (ballRadius * 2.5), 2));
+      const pinchedYBase = yBase * (1 - (pinchStrength * pinchDecay));
+
+      // GAP: Define how far the innermost line is pushed from the ball's center.
+      // Suction side hugs the ball tightly. Pressure side bulges outward.
+      const gapMultiplier = 1.05 + (isSuctionSide ? 0 : spinStrength * 0.25);
+      const dynamicClearance = ballRadius * gapMultiplier;
+
+      // PUSH: Apply a purely additive displacement to clear the ball.
+      // Using purely additive logic guarantees the lines will never cross each other.
+      const blockingFactor = Math.exp(-Math.pow(yBase / (ballRadius * 1.8), 2));
+      const transitionY = pinchedYBase + (blockingFactor * yBaseSign * dynamicClearance);
 
       const entryPoints: Point[] = [];
       for (
@@ -394,8 +412,8 @@ export function PhysicsMicroscope({
         x += entryDir * sampleStep
       ) {
         const distToCenter = Math.abs(x);
-        const nearBall = Math.exp(-distToCenter / Math.max(1, ballRadius * 1.1));
-        const y = yBase + maxDeflection * nearBall;
+        const entryInfluence = Math.exp(-Math.pow(distToCenter / (ballRadius * 2.2), 2));
+        const y = yBase + (transitionY - yBase) * entryInfluence;
         entryPoints.push({ x: centerX + x, y: centerY + y });
       }
       if (entryPoints[entryPoints.length - 1]?.x !== centerX) {
@@ -411,20 +429,13 @@ export function PhysicsMicroscope({
         x += wakeDir * sampleStep
       ) {
         const wakeNorm = clamp(Math.abs(x) / Math.max(1, Math.abs(exitSideX)), 0, 1);
-        const decayRate = wakeBaseDecay + (1 - withFlowBand) * spinStrength * 0.55 - withFlowBand * spinStrength * 0.42;
-        const returnMix = Math.exp(-wakeNorm * decayRate);
-        const baseWake = yBase + (transitionY - yBase) * returnMix;
-        const pinchProfile = Math.exp(-wakeNorm * 2.6);
-        const pinchAmount = clamp((pinchEffect / Math.max(1, ballRadius)) * pinchProfile, 0, 0.55);
-        const pinchShift = withFlowBand === 1
-          ? -yBaseSign * pinchEffect * pinchAmount
-          : yBaseSign * pinchEffect * pinchAmount * 0.34;
-        const pinchedWake = baseWake + pinchShift;
+        const wakeInfluence = Math.exp(-Math.pow(Math.abs(x) / (ballRadius * 2.2), 2));
+        const baseWake = yBase + (transitionY - yBase) * wakeInfluence;
         const wakeWobble = Math.sin((x / (ballRadius * 1.02)) + i * 0.72)
           * (0.72 + flowStrength * 1.02)
           * Math.pow(wakeNorm, 0.9)
           * (0.6 + 0.8 * densityRatio);
-        const y = pinchedWake + wakeWobble;
+        const y = baseWake + (x === 0 ? 0 : wakeWobble);
         wakePoints.push({ x: centerX + x, y: centerY + y });
       }
       if (wakePoints[0]) {
@@ -443,11 +454,11 @@ export function PhysicsMicroscope({
   }, [ballRadius, centerX, centerY, densityRatio, spinRatio, velocityX, velocityY, svgWidth, vizHeight]);
 
   const vectorMinLength = Math.max(16, Math.min(svgWidth, vizHeight) * 0.1);
-  const vectorMaxLength = Math.min(svgWidth, vizHeight) * 0.34;
+  const vectorMaxLength = Math.min(svgWidth, vizHeight) * 0.4;
   const velocityVector = scaleVector(velocityX, -velocityY, 0.85, vectorMinLength, vectorMaxLength);
-  const dragVector = scaleVector(dragX, -dragY, 35, vectorMinLength, vectorMaxLength);
-  const magnusVector = scaleVector(magnusX, -magnusY, 35, vectorMinLength, vectorMaxLength);
-  const gravityVector = scaleVector(gravityX, -gravityY, 35, vectorMinLength, vectorMaxLength);
+  const dragVector = scaleVector(dragX, -dragY, 38, vectorMinLength, vectorMaxLength);
+  const magnusVector = scaleVector(magnusX, -magnusY, 38, vectorMinLength, vectorMaxLength);
+  const gravityVector = scaleVector(gravityX, -gravityY, 38, vectorMinLength, vectorMaxLength);
   const velocityArrow = buildArrowPath(centerX, centerY, velocityVector.dx, velocityVector.dy);
   const dragArrow = buildArrowPath(centerX, centerY, dragVector.dx, dragVector.dy);
   const magnusArrow = buildArrowPath(centerX, centerY, magnusVector.dx, magnusVector.dy);
@@ -560,8 +571,8 @@ export function PhysicsMicroscope({
             </defs>
 
             <g transform={`rotate(${flowAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
-              <ellipse cx={centerX - ballRadius * 1.13} cy={centerY} rx={ballRadius * 1.24} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />
-              <ellipse cx={centerX + ballRadius * 1.39} cy={centerY} rx={ballRadius * 1.72} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
+              <ellipse cx={centerX - ballRadius * 1.3} cy={centerY} rx={ballRadius * 1.4} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />
+              <ellipse cx={centerX + ballRadius * 1.6} cy={centerY} rx={ballRadius * 1.8} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
               <ellipse cx={centerX - ballRadius * 0.24} cy={centerY + againstFlowSide * ballRadius * 0.72} rx={ballRadius * 1.14} ry={ballRadius * 0.88} fill={`url(#${gradientsId}-spin-red)`} />
               <ellipse cx={centerX + ballRadius * 0.34} cy={centerY + withFlowSide * ballRadius * 0.72} rx={ballRadius * 1.2} ry={ballRadius * 0.92} fill={`url(#${gradientsId}-spin-blue)`} />
               {streamlines.map((line) => (
@@ -649,8 +660,8 @@ export function PhysicsMicroscope({
                   <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25 }}>
                     <span>{meta.label} ({meta.unit}): [X: {xComp.toFixed(2)}, Y: {yComp.toFixed(2)}]</span>
                     <span style={{ position: "relative" }}>
-                      <span style={{ position: "absolute", left: "-0.62ch" }}>|</span>
-                      <span>{meta.label}|: {magnitude.toFixed(2)}</span>
+                      <span style={{ position: "absolute", left: "-1.24ch" }}>||</span>
+                      <span>{meta.label}||: {magnitude.toFixed(2)} {meta.unit}</span>
                     </span>
                   </span>
                 </button>
