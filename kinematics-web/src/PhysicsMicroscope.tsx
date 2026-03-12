@@ -8,7 +8,6 @@ export interface PhysicsMicroscopeProps {
   spinRPM: number;
   ballType: MicroscopeBallType;
   airDensity: number;
-  magnusLiftN: number;
   velocityX: number;
   velocityY: number;
   dragX: number;
@@ -29,11 +28,11 @@ const PANEL_PADDING = 10;
 const HEADER_HEIGHT = 38;
 const DETAILS_HEIGHT = 132;
 
-const VECTOR_META: Array<{ key: VectorKey; label: string; color: string }> = [
-  { key: "velocity", label: "Velocity", color: "#22c55e" },
-  { key: "drag", label: "Drag", color: "#ef4444" },
-  { key: "magnus", label: "Magnus", color: "#a855f7" },
-  { key: "gravity", label: "Gravity", color: "#3b82f6" },
+const VECTOR_META: Array<{ key: VectorKey; label: string; unit: string; color: string }> = [
+  { key: "velocity", label: "Velocity", unit: "m/s", color: "#22c55e" },
+  { key: "drag", label: "Drag", unit: "N", color: "#ef4444" },
+  { key: "magnus", label: "Magnus", unit: "N", color: "#a855f7" },
+  { key: "gravity", label: "Gravity", unit: "N", color: "#3b82f6" },
 ];
 
 function clamp(value: number, min: number, max: number): number {
@@ -111,20 +110,16 @@ interface Point {
   y: number;
 }
 
-function buildCubicBezierPath(points: Point[]): string {
+function buildSmoothPath(points: Point[]): string {
   if (points.length < 2) return "";
   let d = `M ${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[Math.max(0, i - 1)];
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    const p3 = points[Math.min(points.length - 1, i + 2)];
-    const cp1x = p1.x + (p2.x - p0.x) / 6;
-    const cp1y = p1.y + (p2.y - p0.y) / 6;
-    const cp2x = p2.x - (p3.x - p1.x) / 6;
-    const cp2y = p2.y - (p3.y - p1.y) / 6;
-    d += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const midX = (points[i].x + points[i + 1].x) * 0.5;
+    const midY = (points[i].y + points[i + 1].y) * 0.5;
+    d += ` Q ${points[i].x.toFixed(1)},${points[i].y.toFixed(1)} ${midX.toFixed(1)},${midY.toFixed(1)}`;
   }
+  const last = points[points.length - 1];
+  d += ` T ${last.x.toFixed(1)},${last.y.toFixed(1)}`;
   return d;
 }
 
@@ -282,7 +277,6 @@ export function PhysicsMicroscope({
   spinRPM,
   ballType,
   airDensity,
-  magnusLiftN,
   velocityX,
   velocityY,
   dragX,
@@ -335,6 +329,16 @@ export function PhysicsMicroscope({
 
   const panelHeight = expanded ? size.height : HEADER_HEIGHT + 2;
   const vizHeight = Math.max(140, panelHeight - HEADER_HEIGHT - DETAILS_HEIGHT);
+  const detailsFontSizeRem = clamp(
+    0.72 + ((size.width - PANEL_DEFAULT_WIDTH) / 1000) + ((size.height - PANEL_DEFAULT_HEIGHT) / 1400),
+    0.72,
+    0.82,
+  );
+  const legendItemFontSizeRem = clamp(
+    0.69 + ((size.width - PANEL_DEFAULT_WIDTH) / 900) + ((size.height - PANEL_DEFAULT_HEIGHT) / 1300),
+    0.69,
+    0.8,
+  );
   const svgWidth = size.width;
   const centerX = svgWidth * 0.5;
   const centerY = vizHeight * 0.52;
@@ -361,67 +365,77 @@ export function PhysicsMicroscope({
     const count = clamp(Math.round(vizHeight / 18), 10, 18);
     const xMin = -svgWidth * 0.48;
     const xMax = svgWidth * 0.48;
-    const frontX = -ballRadius * 1.1;
-    const rearX = ballRadius * 1.05;
+    const isMovingRight = velocityX > 0;
     const withFlowSide = spinRatio >= 0 ? -1 : 1; // backspin+: top, topspin-: bottom
-    const againstFlowSide = -withFlowSide;
-    const spinStrength = clamp(Math.abs(spinRatio) * 2.2, 0, 1.45);
+    const spinStrength = clamp(Math.abs(spinRatio) * 2.2, 0, 1.4);
     const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.5);
+    const yClearance = ballRadius * 1.05;
+    const pinchEffect = ballRadius * clamp(Math.abs(spinRatio) * 0.34, 0, 0.5);
     const ySpread = Math.max(100, vizHeight * 0.76);
-    const sampleStep = Math.max(8, Math.round(svgWidth / 34));
+    const sampleStep = Math.max(8, Math.round(svgWidth / 36));
+    const entrySideX = isMovingRight ? xMax : xMin;
+    const exitSideX = isMovingRight ? xMin : xMax;
+    const entryDir = entrySideX > 0 ? -1 : 1;
+    const wakeDir = exitSideX > 0 ? 1 : -1;
+    const wakeBaseDecay = 2.2 + flowStrength * 1.05;
+
     for (let i = 0; i < count; i++) {
       const yBase = ((i / (count - 1)) - 0.5) * ySpread;
-      const sideSign = Math.sign(yBase === 0 ? withFlowSide : yBase);
+      const yBaseSign = Math.sign(Math.abs(yBase) < 1e-6 ? withFlowSide : yBase);
       const absYNorm = clamp(Math.abs(yBase) / (ySpread * 0.55), 0, 1);
-      const bandInfluence = Math.exp(-Math.pow(absYNorm * 1.5, 2));
-      const withFlowBand = sideSign === withFlowSide ? 1 : 0;
-      const againstFlowBand = sideSign === againstFlowSide ? 1 : 0;
-      const mainPoints: Point[] = [];
-      const wakePoints: Point[] = [];
-      for (let x = xMin; x <= rearX; x += sampleStep) {
-        const xNorm = x / (ballRadius * 2.1);
-        const nearBall = Math.exp(-Math.pow(xNorm, 2));
-        const frontInfluence = Math.exp(-Math.pow((x - frontX) / (ballRadius * 1.1), 2));
-        const rearInfluence = Math.exp(-Math.pow((x - rearX) / (ballRadius * 1.3), 2));
-        // Red stagnation region: streamlines split around the front hemisphere.
-        const frontDivergence = sideSign * frontInfluence * (ballRadius * (0.24 + 0.24 * flowStrength));
-        // Magnus asymmetry: with-flow side bunches, against-flow side spreads.
-        const magnusCompression = withFlowBand * nearBall * (ballRadius * spinStrength * 0.28);
-        const magnusExpansion = againstFlowBand * nearBall * (ballRadius * spinStrength * 0.3);
-        // Spin drags nearby fluid around the with-flow side.
-        const circulationDrag = withFlowSide * nearBall * bandInfluence * (ballRadius * spinStrength * 0.16);
-        const rearConvergence = -sideSign * rearInfluence * (ballRadius * (0.1 + 0.16 * flowStrength));
-        const squeezeFactor = 1
-          - withFlowBand * spinStrength * 0.34 * nearBall
-          + againstFlowBand * spinStrength * 0.26 * nearBall;
-        let yLocal = (yBase * squeezeFactor) + frontDivergence - sideSign * magnusCompression + sideSign * magnusExpansion
-          + circulationDrag + rearConvergence;
-        const clearance = ballRadius + 6;
-        const nearCore = Math.abs(x) <= ballRadius * 0.95;
-        if (nearCore) {
-          const adjustedSign = Math.sign(yLocal === 0 ? sideSign : yLocal);
-          const absDist = Math.abs(yLocal);
-          if (absDist < clearance) {
-            yLocal = adjustedSign * clearance;
-          }
-        }
-        mainPoints.push({ x: centerX + x, y: centerY + yLocal });
+      const withFlowBand = yBaseSign === withFlowSide ? 1 : 0;
+      const maxDeflection = (yBaseSign * yClearance - yBase) * Math.exp(-Math.pow(yBase / (ballRadius * 1.2), 2));
+      const transitionY = yBase + maxDeflection;
+
+      const entryPoints: Point[] = [];
+      for (
+        let x = entrySideX;
+        entryDir > 0 ? x <= 0 : x >= 0;
+        x += entryDir * sampleStep
+      ) {
+        const distToCenter = Math.abs(x);
+        const nearBall = Math.exp(-distToCenter / Math.max(1, ballRadius * 1.1));
+        const y = yBase + maxDeflection * nearBall;
+        entryPoints.push({ x: centerX + x, y: centerY + y });
       }
-      for (let x = rearX; x <= xMax; x += sampleStep) {
-        const wakeNorm = clamp((x - rearX) / Math.max(1, (xMax - rearX)), 0, 1);
-        const wakeBlend = Math.exp(-wakeNorm * 2.1);
-        const wakeConverge = -sideSign * wakeBlend * (ballRadius * (0.22 + 0.15 * flowStrength));
-        const wakeWobble = Math.sin((x / (ballRadius * 0.9)) + i * 0.72) * (0.65 + flowStrength * 1.25)
-          * wakeNorm * (0.6 + 0.8 * densityRatio);
-        const sideBias = withFlowSide * spinStrength * wakeBlend * (ballRadius * 0.09);
-        const y = yBase + wakeConverge + wakeWobble + sideBias;
+      if (entryPoints[entryPoints.length - 1]?.x !== centerX) {
+        entryPoints.push({ x: centerX, y: centerY + transitionY });
+      } else {
+        entryPoints[entryPoints.length - 1] = { x: centerX, y: centerY + transitionY };
+      }
+
+      const wakePoints: Point[] = [];
+      for (
+        let x = 0;
+        wakeDir > 0 ? x <= exitSideX : x >= exitSideX;
+        x += wakeDir * sampleStep
+      ) {
+        const wakeNorm = clamp(Math.abs(x) / Math.max(1, Math.abs(exitSideX)), 0, 1);
+        const decayRate = wakeBaseDecay + (1 - withFlowBand) * spinStrength * 0.55 - withFlowBand * spinStrength * 0.42;
+        const returnMix = Math.exp(-wakeNorm * decayRate);
+        const baseWake = yBase + (transitionY - yBase) * returnMix;
+        const pinchProfile = Math.exp(-wakeNorm * 2.6);
+        const pinchAmount = clamp((pinchEffect / Math.max(1, ballRadius)) * pinchProfile, 0, 0.55);
+        const pinchShift = withFlowBand === 1
+          ? -yBaseSign * pinchEffect * pinchAmount
+          : yBaseSign * pinchEffect * pinchAmount * 0.34;
+        const pinchedWake = baseWake + pinchShift;
+        const wakeWobble = Math.sin((x / (ballRadius * 1.02)) + i * 0.72)
+          * (0.72 + flowStrength * 1.02)
+          * Math.pow(wakeNorm, 0.9)
+          * (0.6 + 0.8 * densityRatio);
+        const y = pinchedWake + wakeWobble;
         wakePoints.push({ x: centerX + x, y: centerY + y });
       }
+      if (wakePoints[0]) {
+        wakePoints[0] = { x: centerX, y: centerY + transitionY };
+      }
+
       const alpha = clamp((0.36 + (1 - absYNorm) * 0.6) * densityRatio, 0.1, 1);
       lines.push({
         id: `line-${i}`,
-        main: buildCubicBezierPath(mainPoints),
-        wake: buildCubicBezierPath(wakePoints),
+        main: buildSmoothPath(entryPoints),
+        wake: buildSmoothPath(wakePoints),
         alpha,
       });
     }
@@ -431,22 +445,28 @@ export function PhysicsMicroscope({
   const vectorMinLength = Math.max(16, Math.min(svgWidth, vizHeight) * 0.1);
   const vectorMaxLength = Math.min(svgWidth, vizHeight) * 0.34;
   const velocityVector = scaleVector(velocityX, -velocityY, 0.85, vectorMinLength, vectorMaxLength);
-  const dragVector = scaleVector(dragX, -dragY, 28, vectorMinLength, vectorMaxLength);
-  const magnusVector = scaleVector(magnusX, -magnusY, 28, vectorMinLength, vectorMaxLength);
-  const gravityVector = scaleVector(gravityX, -gravityY, 28, vectorMinLength, vectorMaxLength);
+  const dragVector = scaleVector(dragX, -dragY, 35, vectorMinLength, vectorMaxLength);
+  const magnusVector = scaleVector(magnusX, -magnusY, 35, vectorMinLength, vectorMaxLength);
+  const gravityVector = scaleVector(gravityX, -gravityY, 35, vectorMinLength, vectorMaxLength);
   const velocityArrow = buildArrowPath(centerX, centerY, velocityVector.dx, velocityVector.dy);
   const dragArrow = buildArrowPath(centerX, centerY, dragVector.dx, dragVector.dy);
   const magnusArrow = buildArrowPath(centerX, centerY, magnusVector.dx, magnusVector.dy);
   const gravityArrow = buildArrowPath(centerX, centerY, gravityVector.dx, gravityVector.dy);
+  const vectorComponents: Record<VectorKey, { x: number; y: number }> = {
+    velocity: { x: velocityX, y: velocityY },
+    drag: { x: dragX, y: dragY },
+    magnus: { x: magnusX, y: magnusY },
+    gravity: { x: gravityX, y: gravityY },
+  };
 
   const dragStrength = clamp((Math.hypot(velocityX, velocityY) / 45) * densityRatio, 0, 1);
   const magnusStrength = clamp(Math.abs(spinRatio) * 1.9 * densityRatio, 0, 1);
   const withFlowSide = spinRatio >= 0 ? -1 : 1;
   const againstFlowSide = -withFlowSide;
-  const pressureFrontRedAlpha = clamp(0.26 + dragStrength * 0.16, 0.3, 0.4);
-  const pressureWakeBlueAlpha = clamp(0.24 + dragStrength * 0.16, 0.3, 0.4);
-  const pressureSpinRedAlpha = clamp(0.22 + magnusStrength * 0.18, 0.28, 0.4);
-  const pressureSpinBlueAlpha = clamp(0.22 + magnusStrength * 0.18, 0.28, 0.4);
+  const pressureFrontRedAlpha = clamp(0.42 + dragStrength * 0.18, 0.4, 0.6);
+  const pressureWakeBlueAlpha = clamp(0.4 + dragStrength * 0.2, 0.4, 0.6);
+  const pressureSpinRedAlpha = clamp(0.4 + magnusStrength * 0.2, 0.4, 0.6);
+  const pressureSpinBlueAlpha = clamp(0.4 + magnusStrength * 0.2, 0.4, 0.6);
   const frontRedColor = `rgba(239,68,68,${pressureFrontRedAlpha.toFixed(3)})`;
   const wakeBlueColor = `rgba(59,130,246,${pressureWakeBlueAlpha.toFixed(3)})`;
   const spinRedColor = `rgba(239,68,68,${pressureSpinRedAlpha.toFixed(3)})`;
@@ -540,8 +560,8 @@ export function PhysicsMicroscope({
             </defs>
 
             <g transform={`rotate(${flowAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
-              <ellipse cx={centerX - ballRadius * 1.08} cy={centerY} rx={ballRadius * 1.24} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />
-              <ellipse cx={centerX + ballRadius * 1.34} cy={centerY} rx={ballRadius * 1.72} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
+              <ellipse cx={centerX - ballRadius * 1.13} cy={centerY} rx={ballRadius * 1.24} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />
+              <ellipse cx={centerX + ballRadius * 1.39} cy={centerY} rx={ballRadius * 1.72} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
               <ellipse cx={centerX - ballRadius * 0.24} cy={centerY + againstFlowSide * ballRadius * 0.72} rx={ballRadius * 1.14} ry={ballRadius * 0.88} fill={`url(#${gradientsId}-spin-red)`} />
               <ellipse cx={centerX + ballRadius * 0.34} cy={centerY + withFlowSide * ballRadius * 0.72} rx={ballRadius * 1.2} ry={ballRadius * 0.92} fill={`url(#${gradientsId}-spin-blue)`} />
               {streamlines.map((line) => (
@@ -559,6 +579,7 @@ export function PhysicsMicroscope({
                     strokeWidth={1.45}
                     fill="none"
                     strokeLinecap="round"
+                    strokeDasharray="7 6"
                   />
                 </g>
               ))}
@@ -590,7 +611,7 @@ export function PhysicsMicroscope({
               borderTop: "1px solid rgba(148,163,184,0.3)",
               color: "#e2e8f0",
               fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-              fontSize: "0.72rem",
+              fontSize: `${detailsFontSizeRem.toFixed(3)}rem`,
               lineHeight: 1.35,
               background: "rgba(2,6,23,0.42)",
               display: "grid",
@@ -602,34 +623,39 @@ export function PhysicsMicroscope({
             <div style={{ gridColumn: "1 / span 2", fontWeight: 700, color: "#f8fafc", marginBottom: "0.15rem" }}>
               Vector Legend (click to toggle)
             </div>
-            {VECTOR_META.map((meta) => (
-              <button
-                key={meta.key}
-                type="button"
-                onClick={() => toggleVector(meta.key)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.35rem",
-                  borderRadius: 6,
-                  border: `1px solid ${visibleVectors[meta.key] ? meta.color : "rgba(148,163,184,0.35)"}`,
-                  background: visibleVectors[meta.key] ? "rgba(15,23,42,0.45)" : "rgba(30,41,59,0.25)",
-                  color: visibleVectors[meta.key] ? "#f8fafc" : "#94a3b8",
-                  padding: "0.22rem 0.36rem",
-                  fontSize: "0.69rem",
-                  cursor: "pointer",
-                }}
-              >
-                <span style={{ color: meta.color, fontWeight: 800, fontSize: "0.9rem", lineHeight: 1 }}>➤</span>
-                <span>{meta.label}</span>
-              </button>
-            ))}
-            <div style={{ gridColumn: "1 / span 2", marginTop: "0.15rem", color: "#cbd5e1" }}>
-              <div>Velocity: {velocity.toFixed(2)} m/s</div>
-              <div>Magnus Lift: {magnusLiftN.toFixed(3)} N</div>
-              <div>Spin Ratio (ωr/v): {spinRatio.toFixed(3)}</div>
-              <div>Air Density: {airDensity.toFixed(3)} kg/m³</div>
-            </div>
+            {VECTOR_META.map((meta) => {
+              const xComp = vectorComponents[meta.key].x;
+              const yComp = vectorComponents[meta.key].y;
+              const magnitude = Math.hypot(xComp, yComp);
+              return (
+                <button
+                  key={meta.key}
+                  type="button"
+                  onClick={() => toggleVector(meta.key)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.35rem",
+                    borderRadius: 6,
+                    border: `1px solid ${visibleVectors[meta.key] ? meta.color : "rgba(148,163,184,0.35)"}`,
+                    background: visibleVectors[meta.key] ? "rgba(15,23,42,0.45)" : "rgba(30,41,59,0.25)",
+                    color: visibleVectors[meta.key] ? "#f8fafc" : "#94a3b8",
+                    padding: "0.22rem 0.36rem",
+                    fontSize: `${legendItemFontSizeRem.toFixed(3)}rem`,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ color: meta.color, fontWeight: 800, fontSize: "0.9rem", lineHeight: 1 }}>➤</span>
+                  <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25 }}>
+                    <span>{meta.label} ({meta.unit}): [X: {xComp.toFixed(2)}, Y: {yComp.toFixed(2)}]</span>
+                    <span style={{ position: "relative" }}>
+                      <span style={{ position: "absolute", left: "-0.62ch" }}>|</span>
+                      <span>{meta.label}|: {magnitude.toFixed(2)}</span>
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <button
             type="button"

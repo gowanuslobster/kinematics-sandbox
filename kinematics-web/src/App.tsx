@@ -213,9 +213,6 @@ function App() {
   const microscopeVelocity = activeAnalysisPoint
     ? Math.hypot(activeAnalysisPoint.vx, activeAnalysisPoint.vy)
     : Math.max(initialVelocity, 0);
-  const microscopeMagnusLift = activeAnalysisPoint
-    ? Math.hypot(activeAnalysisPoint.magnusX, activeAnalysisPoint.magnusY)
-    : 0;
 
   const handleManualAnalysisPointChange = useCallback((point: TrajectoryPoint | null) => {
     if (isAutoScrubbing) return;
@@ -842,14 +839,12 @@ function App() {
             vacuumPath={mode === "live" ? (vacuumPath ?? undefined) : undefined}
             activeAnalysisPoint={activeAnalysisPoint}
             onHoverPointChange={handleManualAnalysisPointChange}
-            isAutoSimulating={isChallenge && isAutoScrubbing}
           />
           <PhysicsMicroscope
             velocity={microscopeVelocity}
             spinRPM={spinRpm}
             ballType={selectedBallType}
             airDensity={airDensity}
-            magnusLiftN={microscopeMagnusLift}
             velocityX={activeAnalysisPoint?.vx ?? defaultVelocityX}
             velocityY={activeAnalysisPoint?.vy ?? defaultVelocityY}
             dragX={activeAnalysisPoint?.dragX ?? 0}

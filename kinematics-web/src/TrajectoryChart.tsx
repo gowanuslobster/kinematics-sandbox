@@ -23,7 +23,6 @@ export interface TrajectoryChartProps {
   pinnedPath?: TrajectoryPoint[];
   vacuumPath?: TrajectoryPoint[];
   activeAnalysisPoint?: TrajectoryPoint | null;
-  isAutoSimulating?: boolean;
   onHoverPointChange?: (point: TrajectoryPoint | null) => void;
 }
 
@@ -48,10 +47,6 @@ const VECTOR_SCALE = 0.25;
 const FORCE_SCALE_MULTIPLIER = 18;
 const PLOT_MARGIN = { t: 24, r: 24, b: 40, l: 48 };
 const HOVER_DISTANCE_PX = 24;
-
-function vectorMagnitude(x: number, y: number): number {
-  return Math.hypot(x, y);
-}
 
 function scaleVector(
   x: number,
@@ -151,7 +146,6 @@ export function TrajectoryChart({
   pinnedPath,
   vacuumPath,
   activeAnalysisPoint,
-  isAutoSimulating = false,
   onHoverPointChange,
 }: TrajectoryChartProps) {
   const plotContainerRef = useRef<HTMLDivElement | null>(null);
@@ -358,63 +352,6 @@ export function TrajectoryChart({
           background: "transparent",
         }}
       />
-      <div
-        style={{
-          position: "absolute",
-          top: 12,
-          right: 12,
-          minWidth: 0,
-          maxWidth: "calc(100% - 24px)",
-          padding: "0.6rem 0.75rem",
-          borderRadius: 8,
-          background: "rgba(17, 24, 39, 0.82)",
-          color: "#e5e7eb",
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-          fontSize: "0.82rem",
-          lineHeight: 1.45,
-          pointerEvents: "none",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
-          overflow: "hidden",
-          zIndex: 5,
-        }}
-      >
-        <div style={{ fontWeight: 700, marginBottom: "0.25rem", color: "#f9fafb" }}>Projectile Stats</div>
-        {isAutoSimulating && (
-          <div style={{ color: "#fbbf24", fontWeight: 700, marginBottom: "0.2rem" }}>Simulating...</div>
-        )}
-        {analysisPoint ? (
-          <>
-            <div>pos  = ({analysisPoint.x.toFixed(2)}, {analysisPoint.y.toFixed(2)}) m</div>
-            <div>vel  = ({analysisPoint.vx.toFixed(2)}, {analysisPoint.vy.toFixed(2)}) m/s</div>
-            <div>|v|  = {vectorMagnitude(analysisPoint.vx, analysisPoint.vy).toFixed(2)} m/s</div>
-            <div>|drag|   = {vectorMagnitude(analysisPoint.dragX, analysisPoint.dragY).toFixed(3)} N</div>
-            <div>|magnus| = {vectorMagnitude(analysisPoint.magnusX, analysisPoint.magnusY).toFixed(3)} N</div>
-            <div>|gravity|= {vectorMagnitude(analysisPoint.gravX, analysisPoint.gravY).toFixed(3)} N</div>
-          </>
-        ) : (
-          <div style={{ color: "#cbd5e1" }}>Hover the current trajectory to inspect vectors.</div>
-        )}
-        <div
-          style={{
-            marginTop: "0.45rem",
-            paddingTop: "0.35rem",
-            borderTop: "1px solid rgba(148,163,184,0.35)",
-            display: "grid",
-            gridTemplateColumns: "auto 1fr",
-            gap: "0.15rem 0.45rem",
-            alignItems: "center",
-          }}
-        >
-          <span style={{ color: "#22c55e", fontWeight: 700 }}>→</span>
-          <span>Velocity</span>
-          <span style={{ color: "#ef4444", fontWeight: 700 }}>→</span>
-          <span>Drag force</span>
-          <span style={{ color: "#a855f7", fontWeight: 700 }}>→</span>
-          <span>Magnus force</span>
-          <span style={{ color: "#3b82f6", fontWeight: 700 }}>→</span>
-          <span>Gravity force</span>
-        </div>
-      </div>
     </div>
   );
 }
