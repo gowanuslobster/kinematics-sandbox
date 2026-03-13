@@ -502,16 +502,26 @@ const streamlines = useMemo(() => {
     gravity: { x: gravityX, y: gravityY },
   };
 
-  const currentSpeed = Math.hypot(velocityX, velocityY);
-  const dragStrength = clamp((currentSpeed / 45) * densityRatio, 0, 1);
-  const speedRatio = currentSpeed / speedSafe;
-  const magnusStrength = clamp(Math.abs(spinRatio) * 1.9 * densityRatio, 0, 1) * speedRatio;
-  const withFlowSide = spinRatio >= 0 ? -1 : 1;
+  //  Get the actual forces in Newtons from the physics engine
+  const actualDragForce = Math.hypot(dragX, dragY);
+  const actualMagnusForce = Math.hypot(magnusX, magnusY);
+
+  //  Map forces to alpha (opacity). 
+  // A typical 3N force maps to 0.75 opacity. 0N force = 0 opacity.
+  const fadeResistance = 0.6;
+  const dragAlpha = clamp(actualDragForce / (actualDragForce + fadeResistance), 0, 0.75);
+  const magnusAlpha = clamp(actualMagnusForce / (actualMagnusForce + fadeResistance), 0, 0.75);
+
+  //  Determine sides using spinRPM (same safe logic as streamlines)
+  const withFlowSide = spinRPM >= 0 ? -1 : 1;
   const againstFlowSide = -withFlowSide;
-  const pressureFrontRedAlpha = clamp(0.42 + dragStrength * 0.18, 0.4, 0.6);
-  const pressureWakeBlueAlpha = clamp(0.4 + dragStrength * 0.2, 0.4, 0.6);
-  const pressureSpinRedAlpha = clamp(0.4 + magnusStrength * 0.2, 0.4, 0.6);
-  const pressureSpinBlueAlpha = clamp(0.4 + magnusStrength * 0.2, 0.4, 0.6);
+
+  //  Apply the dynamic alphas
+  const pressureFrontRedAlpha = dragAlpha;
+  const pressureWakeBlueAlpha = dragAlpha * 0.8; // Wake is naturally a bit fainter
+  const pressureSpinRedAlpha = magnusAlpha;
+  const pressureSpinBlueAlpha = magnusAlpha;
+
   const frontRedColor = `rgba(239,68,68,${pressureFrontRedAlpha.toFixed(3)})`;
   const wakeBlueColor = `rgba(59,130,246,${pressureWakeBlueAlpha.toFixed(3)})`;
   const spinRedColor = `rgba(239,68,68,${pressureSpinRedAlpha.toFixed(3)})`;
@@ -626,8 +636,13 @@ const streamlines = useMemo(() => {
             </defs>
 
             <g transform={`rotate(${streamlineAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
-              <ellipse cx={centerX - ballRadius * 1.3} cy={centerY} rx={ballRadius * 1.4} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />
-              <ellipse cx={centerX + ballRadius * 1.6} cy={centerY} rx={ballRadius * 1.8} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
+              {/* WAKE: Left side (air exits here). Longer shape, low-pressure blue */}
+              <ellipse cx={centerX - ballRadius * 1.6} cy={centerY} rx={ballRadius * 1.8} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
+              
+              {/* FRONT: Right side (air crashes here). Tighter shape, high-pressure red */}
+              <ellipse cx={centerX + ballRadius * 1.3} cy={centerY} rx={ballRadius * 1.4} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />              
+
+              {/* SPIN: Center lines (red for backspin, blue for topspin). Tighter shape, high-pressure */}
               <ellipse cx={centerX - ballRadius * 0.24} cy={centerY + againstFlowSide * ballRadius * 0.72} rx={ballRadius * 1.14} ry={ballRadius * 0.88} fill={`url(#${gradientsId}-spin-red)`} />
               <ellipse cx={centerX + ballRadius * 0.34} cy={centerY + withFlowSide * ballRadius * 0.72} rx={ballRadius * 1.2} ry={ballRadius * 0.92} fill={`url(#${gradientsId}-spin-blue)`} />
               {streamlines.map((line) => (
