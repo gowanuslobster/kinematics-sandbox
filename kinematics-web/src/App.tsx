@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AIR_DENSITY_SEA_LEVEL,
   BALL_PRESETS,
   calculateTrajectory,
   type TrajectoryPoint,
 } from "./physics";
+import { PhysicsMicroscope, type MicroscopeBallType } from "./PhysicsMicroscope";
 import { TrajectoryChart } from "./TrajectoryChart";
 
 type Mode = "live" | "challenge";
+type AnalysisSource = "none" | "manual" | "auto";
 
 const ANIMATION_INTERVAL_MS = 16;
 const ANIMATION_POINTS_PER_FRAME = 2;
@@ -58,6 +60,7 @@ function App() {
   const [dragMax, setDragMax] = useState(1);
   const [mass, setMass] = useState<number>(BALL_PRESETS.baseball.mass);
   const [radius, setRadius] = useState<number>(BALL_PRESETS.baseball.radius);
+  const [selectedBallType, setSelectedBallType] = useState<MicroscopeBallType>("baseball");
   const [spinRpm, setSpinRpm] = useState(0);
   const [airDensity, setAirDensity] = useState(AIR_DENSITY_SEA_LEVEL);
   const [targetX, setTargetX] = useState(100);
@@ -67,7 +70,6 @@ function App() {
   const [yAxisMax, setYAxisMax] = useState(70);
   const [pinnedTrajectory, setPinnedTrajectory] = useState<{
     points: TrajectoryPoint[];
-    settings: string;
   } | null>(null);
 
   /** Challenge mode: shot data and how many points to show (animation). null = not fired yet. */
@@ -76,6 +78,9 @@ function App() {
     hit: boolean;
     visibleCount: number;
   } | null>(null);
+  const [activeAnalysisPoint, setActiveAnalysisPoint] = useState<TrajectoryPoint | null>(null);
+  const [analysisSource, setAnalysisSource] = useState<AnalysisSource>("none");
+  const [isAutoScrubbing, setIsAutoScrubbing] = useState(false);
   const challengeShotRef = useRef<typeof challengeShot>(null);
 
   const targetRadius = targetDiameter / 2;
@@ -113,6 +118,7 @@ function App() {
     const tick = (timestamp: number) => {
       const currentShot = challengeShotRef.current;
       if (!currentShot || currentShot.visibleCount >= currentShot.points.length) {
+        setIsAutoScrubbing(false);
         return;
       }
       if (lastFrameTime == null) {
@@ -125,30 +131,39 @@ function App() {
         return;
       }
       lastFrameTime = timestamp;
-      setChallengeShot((prev) => {
-        if (!prev || prev.visibleCount >= prev.points.length) return prev;
-        const nextVisibleCount = Math.min(prev.visibleCount + ANIMATION_POINTS_PER_FRAME, prev.points.length);
-        const prevPoint = prev.points[Math.max(0, prev.visibleCount - 1)];
-        const nextPoint = prev.points[Math.max(0, nextVisibleCount - 1)];
-        const pointDelta = prevPoint && nextPoint
-          ? Math.hypot(nextPoint.x - prevPoint.x, nextPoint.y - prevPoint.y)
-          : Number.POSITIVE_INFINITY;
-        if (pointDelta <= STATIC_POINT_DELTA_EPSILON) {
-          staticFrameStreakRef.current += 1;
-        } else {
-          staticFrameStreakRef.current = 0;
-        }
-        const idleForMs = Date.now() - lastInteractionAtRef.current;
-        const shouldPauseLoop =
-          idleForMs >= STATIC_IDLE_MS && staticFrameStreakRef.current >= STATIC_FRAME_STREAK_TO_PAUSE;
-        if (shouldPauseLoop) {
-          return { ...prev, visibleCount: prev.points.length };
-        }
-        return {
-          ...prev,
-          visibleCount: nextVisibleCount,
-        };
-      });
+      let nextVisibleCount = Math.min(
+        currentShot.visibleCount + ANIMATION_POINTS_PER_FRAME,
+        currentShot.points.length,
+      );
+      const prevPoint = currentShot.points[Math.max(0, currentShot.visibleCount - 1)];
+      const nextPoint = currentShot.points[Math.max(0, nextVisibleCount - 1)];
+      const pointDelta = prevPoint && nextPoint
+        ? Math.hypot(nextPoint.x - prevPoint.x, nextPoint.y - prevPoint.y)
+        : Number.POSITIVE_INFINITY;
+      if (pointDelta <= STATIC_POINT_DELTA_EPSILON) {
+        staticFrameStreakRef.current += 1;
+      } else {
+        staticFrameStreakRef.current = 0;
+      }
+      const idleForMs = Date.now() - lastInteractionAtRef.current;
+      const shouldPauseLoop =
+        idleForMs >= STATIC_IDLE_MS && staticFrameStreakRef.current >= STATIC_FRAME_STREAK_TO_PAUSE;
+      if (shouldPauseLoop) {
+        nextVisibleCount = currentShot.points.length;
+      }
+      const nextShot = {
+        ...currentShot,
+        visibleCount: nextVisibleCount,
+      };
+      challengeShotRef.current = nextShot;
+      setChallengeShot(nextShot);
+      if (nextVisibleCount > 0) {
+        setActiveAnalysisPoint(nextShot.points[nextVisibleCount - 1] ?? null);
+      }
+      if (nextVisibleCount >= currentShot.points.length) {
+        setIsAutoScrubbing(false);
+        return;
+      }
       frameId = requestAnimationFrame(tick);
     };
     frameId = requestAnimationFrame(tick);
@@ -185,35 +200,6 @@ function App() {
 
   const { points, hit, vacuumPath, timeOfFlightVacuum, timeOfFlightActual, maxHeightVacuum, maxHeightActual, rangeVacuum, rangeActual } = simulationResult;
 
-  const currentTrajectorySettings = useMemo(
-    () =>
-      [
-        `v₀: ${initialVelocity.toFixed(2)} m/s`,
-        `θ: ${launchAngle.toFixed(1)}°`,
-        `g: ${gravity.toFixed(2)} m/s²`,
-        `C_d: ${dragCoefficient.toFixed(2)}`,
-        `mass: ${mass.toFixed(4)} kg`,
-        `radius: ${radius.toFixed(4)} m`,
-        `spin: ${spinRpm} rpm`,
-        `air density: ${airDensity.toFixed(3)} kg/m³`,
-        `target: (${targetX.toFixed(1)}, ${targetY.toFixed(1)}) m`,
-        `target diameter: ${targetDiameter.toFixed(1)} m`,
-      ].join("<br>"),
-    [
-      initialVelocity,
-      launchAngle,
-      gravity,
-      dragCoefficient,
-      mass,
-      radius,
-      spinRpm,
-      airDensity,
-      targetX,
-      targetY,
-      targetDiameter,
-    ],
-  );
-
   const visiblePoints: TrajectoryPoint[] = useMemo(() => {
     if (mode === "live") return points;
     if (!challengeShot) return [];
@@ -221,11 +207,31 @@ function App() {
   }, [mode, challengeShot, points]);
 
   const displayHit = mode === "live" ? hit : (challengeComplete && challengeShot ? challengeShot.hit : false);
+  const launchAngleRad = (launchAngle * Math.PI) / 180;
+  const defaultVelocityX = Math.max(initialVelocity, 0) * Math.cos(launchAngleRad);
+  const defaultVelocityY = Math.max(initialVelocity, 0) * Math.sin(launchAngleRad);
+
+  const handleManualAnalysisPointChange = useCallback((point: TrajectoryPoint | null) => {
+    if (isAutoScrubbing) return;
+    if (analysisSource === "auto") {
+      // After auto-scrub completes, keep final point until user deliberately hovers.
+      if (point == null) return;
+      setAnalysisSource("manual");
+      setActiveAnalysisPoint(point);
+      return;
+    }
+    if (point == null) {
+      setAnalysisSource("none");
+      setActiveAnalysisPoint(null);
+      return;
+    }
+    setAnalysisSource("manual");
+    setActiveAnalysisPoint(point);
+  }, [analysisSource, isAutoScrubbing]);
 
   const handlePinCurrentTrajectory = () => {
     setPinnedTrajectory({
       points: [...points],
-      settings: currentTrajectorySettings,
     });
   };
 
@@ -237,11 +243,16 @@ function App() {
     if (mode !== "challenge") return;
     staticFrameStreakRef.current = 0;
     lastInteractionAtRef.current = Date.now();
-    setChallengeShot({
+    const shot = {
       points: [...points],
       hit,
       visibleCount: 0,
-    });
+    };
+    setAnalysisSource("auto");
+    setIsAutoScrubbing(true);
+    setActiveAnalysisPoint(shot.points[0] ?? null);
+    challengeShotRef.current = shot;
+    setChallengeShot(shot);
   };
 
   const hitHint = useMemo(() => {
@@ -290,6 +301,9 @@ function App() {
           onClick={() => {
             setMode("live");
             staticFrameStreakRef.current = 0;
+            setIsAutoScrubbing(false);
+            setAnalysisSource("none");
+            setActiveAnalysisPoint(null);
             setChallengeShot(null);
           }}
           style={{
@@ -307,7 +321,11 @@ function App() {
         </button>
         <button
           type="button"
-          onClick={() => setMode("challenge")}
+          onClick={() => {
+            setMode("challenge");
+            setAnalysisSource("none");
+            setActiveAnalysisPoint(null);
+          }}
           style={{
             padding: "0.35rem 0.75rem",
             fontSize: "0.8125rem",
@@ -494,7 +512,10 @@ function App() {
             max={Math.max(0.01, dragMax)}
             step={0.01}
             value={Math.min(dragCoefficient, Math.max(0.01, dragMax))}
-            onChange={(e) => setDragCoefficient(Number(e.target.value))}
+            onChange={(e) => {
+              setDragCoefficient(Number(e.target.value));
+              setSelectedBallType("custom");
+            }}
             style={inputStyle}
             aria-label="Drag coefficient dimensionless"
           />
@@ -512,7 +533,10 @@ function App() {
                 const n = Number(e.target.value);
                 if (!Number.isNaN(n) && n >= 0.01 && n <= 2) {
                   setDragMax(n);
-                  if (dragCoefficient > n) setDragCoefficient(n);
+                  if (dragCoefficient > n) {
+                    setDragCoefficient(n);
+                    setSelectedBallType("custom");
+                  }
                 }
               }}
               style={maxInputStyle}
@@ -536,6 +560,7 @@ function App() {
                 setMass(BALL_PRESETS.baseball.mass);
                 setRadius(BALL_PRESETS.baseball.radius);
                 setDragCoefficient(BALL_PRESETS.baseball.dragCoefficient);
+                setSelectedBallType("baseball");
               }}
               style={{
                 padding: "0.35rem 0.5rem",
@@ -554,6 +579,7 @@ function App() {
                 setMass(BALL_PRESETS.pingPong.mass);
                 setRadius(BALL_PRESETS.pingPong.radius);
                 setDragCoefficient(BALL_PRESETS.pingPong.dragCoefficient);
+                setSelectedBallType("pingPong");
               }}
               style={{
                 padding: "0.35rem 0.5rem",
@@ -566,7 +592,29 @@ function App() {
             >
               Ping pong
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMass(BALL_PRESETS.cannonball.mass);
+                setRadius(BALL_PRESETS.cannonball.radius);
+                setDragCoefficient(BALL_PRESETS.cannonball.dragCoefficient);
+                setSelectedBallType("cannonball");
+              }}
+              style={{
+                padding: "0.35rem 0.5rem",
+                fontSize: "0.75rem",
+                background: "#e5e7eb",
+                border: "1px solid #d1d5db",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              Cannonball
+            </button>
           </div>
+          <span style={{ ...valueStyle, fontSize: "0.7rem" }}>
+            Selected: {selectedBallType === "pingPong" ? "Ping Pong" : selectedBallType[0].toUpperCase() + selectedBallType.slice(1)}
+          </span>
         </div>
         <div
           style={{
@@ -583,7 +631,10 @@ function App() {
             value={mass}
             onChange={(e) => {
               const n = Number(e.target.value);
-              if (!Number.isNaN(n) && n > 0) setMass(n);
+              if (!Number.isNaN(n) && n > 0) {
+                setMass(n);
+                setSelectedBallType("custom");
+              }
             }}
             style={{ ...inputStyle, padding: "0.35rem 0.5rem" }}
             aria-label="Ball mass"
@@ -604,7 +655,10 @@ function App() {
             value={radius}
             onChange={(e) => {
               const n = Number(e.target.value);
-              if (!Number.isNaN(n) && n > 0) setRadius(n);
+              if (!Number.isNaN(n) && n > 0) {
+                setRadius(n);
+                setSelectedBallType("custom");
+              }
             }}
             style={{ ...inputStyle, padding: "0.35rem 0.5rem" }}
             aria-label="Ball radius"
@@ -772,20 +826,36 @@ function App() {
             minHeight: 280,
             display: "flex",
             flexDirection: "column",
+            position: "relative",
           }}
         >
           <TrajectoryChart
             points={visiblePoints}
             xRange={[0, xAxisMax]}
             yRange={[0, yAxisMax]}
+            trajectoryColor={mode === "live" ? "#d97706" : "#0284c7"}
             targetX={targetX}
             targetY={targetY}
             targetSize={targetRadius}
             hit={displayHit}
             pinnedPath={mode === "live" ? (pinnedTrajectory?.points ?? undefined) : undefined}
-            pinnedSettings={mode === "live" ? (pinnedTrajectory?.settings ?? undefined) : undefined}
-            currentSettings={mode === "live" ? currentTrajectorySettings : undefined}
             vacuumPath={mode === "live" ? (vacuumPath ?? undefined) : undefined}
+            activeAnalysisPoint={activeAnalysisPoint}
+            onHoverPointChange={handleManualAnalysisPointChange}
+          />
+          <PhysicsMicroscope
+            mass={mass}
+            spinRPM={spinRpm}
+            ballType={selectedBallType}
+            airDensity={airDensity}
+            velocityX={activeAnalysisPoint?.vx ?? defaultVelocityX}
+            velocityY={activeAnalysisPoint?.vy ?? defaultVelocityY}
+            dragX={activeAnalysisPoint?.dragX ?? 0}
+            dragY={activeAnalysisPoint?.dragY ?? 0}
+            magnusX={activeAnalysisPoint?.magnusX ?? 0}
+            magnusY={activeAnalysisPoint?.magnusY ?? 0}
+            gravityX={activeAnalysisPoint?.gravX ?? 0}
+            gravityY={activeAnalysisPoint?.gravY ?? -(mass * gravity)}
           />
         </div>
         <div
