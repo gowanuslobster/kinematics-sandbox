@@ -512,7 +512,10 @@ function App() {
             max={Math.max(0.01, dragMax)}
             step={0.01}
             value={Math.min(dragCoefficient, Math.max(0.01, dragMax))}
-            onChange={(e) => setDragCoefficient(Number(e.target.value))}
+            onChange={(e) => {
+              setDragCoefficient(Number(e.target.value));
+              setSelectedBallType("custom");
+            }}
             style={inputStyle}
             aria-label="Drag coefficient dimensionless"
           />
@@ -530,7 +533,10 @@ function App() {
                 const n = Number(e.target.value);
                 if (!Number.isNaN(n) && n >= 0.01 && n <= 2) {
                   setDragMax(n);
-                  if (dragCoefficient > n) setDragCoefficient(n);
+                  if (dragCoefficient > n) {
+                    setDragCoefficient(n);
+                    setSelectedBallType("custom");
+                  }
                 }
               }}
               style={maxInputStyle}

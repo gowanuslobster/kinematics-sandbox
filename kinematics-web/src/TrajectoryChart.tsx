@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import PlotLib from "react-plotly.js";
 import type { TrajectoryPoint } from "./physics";
+import { scaleVector } from "./vectorUtils";
 
 const Plot = PlotLib as FC<{
   data: object[];
@@ -47,34 +48,6 @@ const VECTOR_SCALE = 0.25;
 const FORCE_SCALE_MULTIPLIER = 18;
 const PLOT_MARGIN = { t: 24, r: 24, b: 40, l: 48 };
 const HOVER_DISTANCE_PX = 24;
-
-function scaleVector(
-  x: number,
-  y: number,
-  factor: number,
-  maxLength: number,
-  minLength: number,
-): { dx: number; dy: number } {
-  const sourceLength = Math.hypot(x, y);
-  if (sourceLength < 1e-8) {
-    return { dx: 0, dy: 0 };
-  }
-  let dx = x * factor;
-  let dy = y * factor;
-  let len = Math.hypot(dx, dy);
-  if (len > 0 && len < minLength) {
-    const ratio = minLength / len;
-    dx *= ratio;
-    dy *= ratio;
-    len = Math.hypot(dx, dy);
-  }
-  if (len > maxLength && len > 0) {
-    const ratio = maxLength / len;
-    dx *= ratio;
-    dy *= ratio;
-  }
-  return { dx, dy };
-}
 
 function buildArrowShapes(
   originX: number,
@@ -239,27 +212,27 @@ export function TrajectoryChart({
     const maxVectorLength = axisSpan * 0.22;
     const minVectorLength = axisSpan * 0.03;
 
-    const velocity = scaleVector(analysisPoint.vx, analysisPoint.vy, VECTOR_SCALE, maxVectorLength, minVectorLength);
+    const velocity = scaleVector(analysisPoint.vx, analysisPoint.vy, VECTOR_SCALE, minVectorLength, maxVectorLength);
     const drag = scaleVector(
       analysisPoint.dragX,
       analysisPoint.dragY,
       VECTOR_SCALE * FORCE_SCALE_MULTIPLIER,
-      maxVectorLength,
       minVectorLength,
+      maxVectorLength,
     );
     const magnus = scaleVector(
       analysisPoint.magnusX,
       analysisPoint.magnusY,
       VECTOR_SCALE * FORCE_SCALE_MULTIPLIER,
-      maxVectorLength,
       minVectorLength,
+      maxVectorLength,
     );
     const gravity = scaleVector(
       analysisPoint.gravX,
       analysisPoint.gravY,
       VECTOR_SCALE * FORCE_SCALE_MULTIPLIER,
-      maxVectorLength,
       minVectorLength,
+      maxVectorLength,
     );
 
     nextShapes.push(
