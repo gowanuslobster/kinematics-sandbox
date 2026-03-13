@@ -4,7 +4,6 @@ import { AIR_DENSITY_SEA_LEVEL } from "./physics";
 export type MicroscopeBallType = "baseball" | "pingPong" | "cannonball" | "custom";
 
 export interface PhysicsMicroscopeProps {
-  velocity: number;
   spinRPM: number;
   ballType: MicroscopeBallType;
   airDensity: number;
@@ -285,7 +284,6 @@ function useDraggableResizableWindow() {
 }
 
 export function PhysicsMicroscope({
-  velocity,
   spinRPM,
   ballType,
   airDensity,
@@ -310,22 +308,6 @@ export function PhysicsMicroscope({
     gravity: true,
   });
   const { position, size, beginDrag, beginResize } = useDraggableResizableWindow();
-
-  const spinRad = (spinRPM * 2 * Math.PI) / 60;
-  const ballRadiusMeters = useMemo(() => {
-    switch (ballType) {
-      case "baseball":
-        return 0.037;
-      case "pingPong":
-        return 0.02;
-      case "cannonball":
-        return 0.09;
-      default:
-        return 0.037;
-    }
-  }, [ballType]);
-  const speedSafe = Math.max(velocity, 0.2);
-  const spinRatio = (spinRad * ballRadiusMeters) / speedSafe;
 
   useEffect(() => {
     if (Math.abs(spinRPM) < 0.01) return;
@@ -654,7 +636,6 @@ const streamlines = useMemo(() => {
                 <stop offset="100%" stopColor="rgba(0,0,0,0)" />
               </radialGradient>
             </defs>
-            image.png
             <g transform={`rotate(${streamlineAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
               {/* WAKE: Left side (air exits here). Longer shape, low-pressure blue */}
               <ellipse cx={centerX - ballRadius * 1.6} cy={centerY} rx={ballRadius * 1.8} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />

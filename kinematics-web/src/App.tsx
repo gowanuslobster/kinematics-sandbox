@@ -210,9 +210,6 @@ function App() {
   const launchAngleRad = (launchAngle * Math.PI) / 180;
   const defaultVelocityX = Math.max(initialVelocity, 0) * Math.cos(launchAngleRad);
   const defaultVelocityY = Math.max(initialVelocity, 0) * Math.sin(launchAngleRad);
-  const microscopeVelocity = activeAnalysisPoint
-    ? Math.hypot(activeAnalysisPoint.vx, activeAnalysisPoint.vy)
-    : Math.max(initialVelocity, 0);
 
   const handleManualAnalysisPointChange = useCallback((point: TrajectoryPoint | null) => {
     if (isAutoScrubbing) return;
@@ -842,7 +839,6 @@ function App() {
           />
           <PhysicsMicroscope
             mass={mass}
-            velocity={microscopeVelocity}
             spinRPM={spinRpm}
             ballType={selectedBallType}
             airDensity={airDensity}
