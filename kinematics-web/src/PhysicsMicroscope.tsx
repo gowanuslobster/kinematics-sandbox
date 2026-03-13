@@ -373,56 +373,70 @@ export function PhysicsMicroscope({
   const flowAngleDeg = (Math.atan2(flowVectorY, flowVectorX) * 180) / Math.PI;
   const streamlineAngleDeg = keepStreamlinesHorizontal ? 0 : flowAngleDeg;
 
-  const streamlines = useMemo(() => {
-    const lines: Array<{ id: string; main: string; wake: string; alpha: number }> = [];
-    const count = 2; // TEMP //clamp(Math.round(vizHeight / 18), 10, 18);
-    const xMin = -svgWidth * 0.48;
-    const xMax = svgWidth * 0.48;
+const streamlines = useMemo(() => {
+  const lines: Array<{ id: string; main: string; wake: string; alpha: number }> = [];
+  
+  // Dynamically calculate lines based on panel height (max ~18 total, so 9 per side)
+  const totalCount = clamp(Math.round(vizHeight / 18), 10, 18);
+  const halfCount = Math.floor(totalCount / 2);
 
-    // backspin+: top, topspin-: bottom
-    const withFlowSide = spinRPM >= 0 ? -1 : 1; 
-    // Get the raw force magnitude in Newtons directly from the purple arrow
-    const actualMagnusForce = Math.hypot(magnusX, magnusY);
-        
-    // Map that force directly to our visual distortion
-    const spinStrength = clamp(actualMagnusForce * 0.35, 0, 1.4);
+  const xMin = -svgWidth * 0.48;
+  const xMax = svgWidth * 0.48;
 
-    const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.5);
-    const ySpread = Math.max(100, vizHeight * 0.76);
-    const sampleStep = Math.max(8, Math.round(svgWidth / 36));
-    
-    for (let i = 0; i < count; i++) {
-      const yBase = i===0 ? -1: 1 // TEMP //((i / (count - 1)) - 0.5) * ySpread;
-      const yBaseSign = Math.sign(Math.abs(yBase) < 1e-6 ? withFlowSide : yBase);
-      const absYNorm = clamp(Math.abs(yBase) / (ySpread * 0.55), 0, 1);
+  // backspin+: top, topspin-: bottom
+  const withFlowSide = spinRPM >= 0 ? -1 : 1; 
+  const actualMagnusForce = Math.hypot(magnusX, magnusY);
+  const spinStrength = clamp(actualMagnusForce * 0.35, 0, 1.4);
+  const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.5);
+  const sampleStep = Math.max(8, Math.round(svgWidth / 36));
+  
+  // The standard gap between lines at the far right edge of the screen
+  const baseSpacing = 22; 
 
-      // Determine if this specific line is on the "suction" side (with-flow)
-      const isSuctionSide = (yBaseSign === withFlowSide);
+  // Generate Top lines (side = -1) then Bottom lines (side = 1)
+  for (const side of [-1, 1]) {
+    const isSuctionSide = (side === withFlowSide);
 
-      // 1. BOUNDARY LAYER WIDTH: How far out into the air the ball's presence is felt.
-      // Suction side gets a very narrow boundary, forcing lines to squeeze tightly around the ball.
-      // Pressure side gets a wide boundary, so the bend starts early and lines spread out.
-      const baseDisturbance = ballRadius * 1.8;
-      const disturbanceWidth = isSuctionSide 
-        ? baseDisturbance * (1 - spinStrength * 0.35) 
-        : baseDisturbance * (1 + spinStrength * 0.5);
+    // 1. ANCHOR CLEARANCE: How closely the innermost line hugs the ball
+    const baseClearance = 1.18;
+    const suctionGap = Math.max(1.04, baseClearance - (spinStrength * 0.35));
+    const pressureGap = baseClearance + (spinStrength * 0.50);
+    const anchorClearance = ballRadius * (isSuctionSide ? suctionGap : pressureGap);
 
-      // 2. GAP CLEARANCE: How closely the innermost line hugs the ball.
-      const baseClearance = 1.18;
-      const suctionGap = Math.max(1.04, baseClearance - (spinStrength * 0.35));
-      const pressureGap = baseClearance + (spinStrength * 0.75);
-      const gapMultiplier = isSuctionSide ? suctionGap : pressureGap;
-      const dynamicClearance = ballRadius * gapMultiplier;
+    // 2. LAYER SPACING: The gap between stacked lines at the ball's center.
+    // Suction lines pack tightly together. Pressure lines spread far apart.
+    const layerSpacing = isSuctionSide 
+      ? Math.max(4, baseSpacing * (1 - spinStrength * 0.5)) 
+      : baseSpacing * (1 + spinStrength * 0.9);
 
-      // 3. PUSH: Apply the Gaussian displacement.
-      // Using the pure yBase guarantees outer lines stay perfectly parallel.
-      const blockingFactor = Math.exp(-Math.pow(yBase / disturbanceWidth, 2));
-      const transitionY = yBase + (blockingFactor * yBaseSign * dynamicClearance);
+    // 3. BEND WIDTH: How far out in front of the ball the lines start to curve.
+    // Suction side dives sharply. Pressure side bulges gently.
+    const bendWidth = isSuctionSide 
+      ? ballRadius * (1.8 - spinStrength * 0.35) 
+      : ballRadius * (1.8 + spinStrength * 0.5);
 
+    let previousTransitionY = 0; // Tracks the peak of the layer below it
+
+    for (let layer = 0; layer < halfCount; layer++) {
+      // yBase is where the line enters the screen at the far right edge
+      // Layer 0 starts near center. Layer 1 starts baseSpacing pixels further out.
+      const yBase = side * (layer === 0 ? 1 : layer * baseSpacing);
+      
+      // transitionY is the peak curve exactly above/below the center of the ball
+      let transitionY: number;
+      if (layer === 0) {
+        transitionY = side * anchorClearance;
+      } else {
+        // Stack this line directly on top of the previous line's peak + the gap
+        transitionY = previousTransitionY + (side * layerSpacing);
+      }
+      previousTransitionY = transitionY; // Save for the next loop iteration
+
+      // Generate the smooth curve from entry edge to the center peak
       const entryPoints: Point[] = [];
       for (let x = xMax; x >= 0; x -= sampleStep) {
         const distToCenter = Math.abs(x);
-        const entryInfluence = Math.exp(-Math.pow(distToCenter / (ballRadius * 2.2), 2));
+        const entryInfluence = Math.exp(-Math.pow(distToCenter / bendWidth, 2));
         const y = yBase + (transitionY - yBase) * entryInfluence;
         entryPoints.push({ x: centerX + x, y: centerY + y });
       }
@@ -432,15 +446,18 @@ export function PhysicsMicroscope({
         entryPoints[entryPoints.length - 1] = { x: centerX, y: centerY + transitionY };
       }
 
+      // Generate the wake curve and wobble
       const wakePoints: Point[] = [];
       for (let x = 0; x >= xMin; x -= sampleStep) {
         const wakeNorm = clamp(Math.abs(x) / Math.max(1, Math.abs(xMin)), 0, 1);
-        const wakeInfluence = Math.exp(-Math.pow(Math.abs(x) / (ballRadius * 2.2), 2));
+        const wakeInfluence = Math.exp(-Math.pow(Math.abs(x) / bendWidth, 2));
         const baseWake = yBase + (transitionY - yBase) * wakeInfluence;
-        const wakeWobble = Math.sin((x / (ballRadius * 1.02)) + i * 0.72)
+        
+        const wakeWobble = Math.sin((x / (ballRadius * 1.02)) + (layer * 0.72))
           * (0.72 + flowStrength * 1.02)
           * Math.pow(wakeNorm, 0.9)
           * (0.6 + 0.8 * densityRatio);
+          
         const y = baseWake + wakeWobble;
         wakePoints.push({ x: centerX + x, y: centerY + y });
       }
@@ -448,18 +465,21 @@ export function PhysicsMicroscope({
         wakePoints[0] = { x: centerX, y: centerY + transitionY };
       }
 
+      // Calculate visual fade based on how far out the layer is
+      const absYNorm = layer / 8; // Assuming 8 layers max eventually
       const alpha = clamp((0.36 + (1 - absYNorm) * 0.6) * densityRatio, 0.1, 1);
+      
       lines.push({
-        id: `line-${i}`,
+        id: `line-${side > 0 ? 'bottom' : 'top'}-${layer}`,
         main: buildSmoothPath(entryPoints),
         wake: buildSmoothPath(wakePoints),
         alpha,
       });
     }
-    return lines;
-  }, [ballRadius, centerX, centerY, densityRatio, spinRatio, velocityX, velocityY, svgWidth, vizHeight]);
+  }
+  return lines;
+}, [ballRadius, centerX, centerY, densityRatio, spinRPM, velocityX, velocityY, svgWidth, vizHeight, magnusX, magnusY]);
 
-  //const vectorMinLength = Math.max(16, Math.min(svgWidth, vizHeight) * 0.1);
   const vectorMinLength = 7;
   const vectorMaxLength = Math.min(svgWidth, vizHeight) * 0.4;
   const vectorFrameRotationRad = keepStreamlinesHorizontal ? -(flowAngleDeg * Math.PI / 180) : 0;
@@ -486,16 +506,6 @@ export function PhysicsMicroscope({
   const dragStrength = clamp((currentSpeed / 45) * densityRatio, 0, 1);
   const speedRatio = currentSpeed / speedSafe;
   const magnusStrength = clamp(Math.abs(spinRatio) * 1.9 * densityRatio, 0, 1) * speedRatio;
-
-
-  // --- TEMPORARY DEBUG VARIABLES ---
-  const debugBaseSpinStrength = clamp(Math.abs(spinRatio) * 2.2, 0, 1.4);
-  const debugSpinStrength = debugBaseSpinStrength * speedRatio;
-  const debugPressureGap = 1.18 + (debugSpinStrength * 0.75);
-  // Calculating transitionY for the bottom line specifically (yBase = 1, blockingFactor = 1 at center)
-  const debugTransitionY = 1 + (ballRadius * debugPressureGap); 
-  // ---------------------------------
-  
   const withFlowSide = spinRatio >= 0 ? -1 : 1;
   const againstFlowSide = -withFlowSide;
   const pressureFrontRedAlpha = clamp(0.42 + dragStrength * 0.18, 0.4, 0.6);
@@ -678,24 +688,6 @@ export function PhysicsMicroscope({
           >
             <div style={{ gridColumn: "1 / span 2", fontWeight: 700, color: "#f8fafc", marginBottom: "0.15rem" }}>
               Vector Legend (click to toggle)
-            </div>
-            {/* TEMPORARY DEBUG UI */}
-            <div style={{
-              gridColumn: "1 / span 2",
-              border: "1px dashed #eab308",
-              background: "rgba(234, 179, 8, 0.15)",
-              color: "#fdf08a",
-              padding: "0.22rem 0.4rem",
-              borderRadius: 4,
-              fontSize: `${(legendItemFontSizeRem * 0.95).toFixed(3)}rem`,
-              display: "flex",
-              justifyContent: "space-between",
-              marginBottom: "0.2rem"
-            }}>
-              <span>baseSpin: {debugBaseSpinStrength.toFixed(3)}</span>
-              <span>spinStr: {debugSpinStrength.toFixed(3)}</span>
-              <span>pGap: {debugPressureGap.toFixed(3)}</span>
-              <span>transY: {debugTransitionY.toFixed(1)}</span>
             </div>
             {VECTOR_META.map((meta) => {
               const xComp = vectorComponents[meta.key].x;
