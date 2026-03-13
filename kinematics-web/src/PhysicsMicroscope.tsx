@@ -22,9 +22,11 @@ type VectorKey = "velocity" | "drag" | "magnus" | "gravity";
 
 const PANEL_MIN_WIDTH = 300;
 const PANEL_MIN_HEIGHT = 320;
-const PANEL_DEFAULT_WIDTH = 360;
-const PANEL_DEFAULT_HEIGHT = 390;
+const PANEL_DEFAULT_WIDTH = 550;
+const PANEL_DEFAULT_HEIGHT = 450;
 const PANEL_PADDING = 10;
+const PANEL_INITIAL_X_OFFSET = 28;
+const PANEL_INITIAL_Y_OFFSET = 62;
 const HEADER_HEIGHT = 38;
 const DETAILS_HEIGHT = 132;
 
@@ -105,6 +107,15 @@ function buildArrowPath(cx: number, cy: number, dx: number, dy: number): string 
   return `M ${cx},${cy} L ${tx},${ty} M ${tx},${ty} L ${leftX},${leftY} M ${tx},${ty} L ${rightX},${rightY}`;
 }
 
+function rotateVector(x: number, y: number, angleRad: number): { x: number; y: number } {
+  const cosA = Math.cos(angleRad);
+  const sinA = Math.sin(angleRad);
+  return {
+    x: (x * cosA) - (y * sinA),
+    y: (x * sinA) + (y * cosA),
+  };
+}
+
 interface Point {
   x: number;
   y: number;
@@ -173,8 +184,8 @@ function useDraggableResizableWindow() {
     const width = clamp(PANEL_DEFAULT_WIDTH, PANEL_MIN_WIDTH, viewport.width - PANEL_PADDING * 2);
     const height = clamp(PANEL_DEFAULT_HEIGHT, PANEL_MIN_HEIGHT, viewport.height - PANEL_PADDING * 2);
     return {
-      x: clamp(viewport.width - width - 24, PANEL_PADDING, viewport.width - width - PANEL_PADDING),
-      y: clamp(viewport.height - height - 24, PANEL_PADDING, viewport.height - height - PANEL_PADDING),
+      x: clamp(viewport.width - width - PANEL_INITIAL_X_OFFSET, PANEL_PADDING, viewport.width - width - PANEL_PADDING),
+      y: clamp(PANEL_INITIAL_Y_OFFSET, PANEL_PADDING, viewport.height - height - PANEL_PADDING),
     };
   });
   const actionRef = useRef<{
@@ -288,7 +299,8 @@ export function PhysicsMicroscope({
 }: PhysicsMicroscopeProps) {
   const gradientsId = useId();
   const [rotationDeg, setRotationDeg] = useState(0);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [keepStreamlinesHorizontal, setKeepStreamlinesHorizontal] = useState(true);
   const [visibleVectors, setVisibleVectors] = useState<Record<VectorKey, boolean>>({
     velocity: true,
     drag: true,
@@ -359,6 +371,7 @@ export function PhysicsMicroscope({
   // Convert from physics Y-up vectors to SVG Y-down orientation.
   const flowVectorY = Math.abs(velocityX) < 0.01 && Math.abs(velocityY) < 0.01 ? 0 : -velocityY;
   const flowAngleDeg = (Math.atan2(flowVectorY, flowVectorX) * 180) / Math.PI;
+  const streamlineAngleDeg = keepStreamlinesHorizontal ? 0 : flowAngleDeg;
 
   const streamlines = useMemo(() => {
     const lines: Array<{ id: string; main: string; wake: string; alpha: number }> = [];
@@ -369,7 +382,6 @@ export function PhysicsMicroscope({
     const withFlowSide = spinRatio >= 0 ? -1 : 1; // backspin+: top, topspin-: bottom
     const spinStrength = clamp(Math.abs(spinRatio) * 2.2, 0, 1.4);
     const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.5);
-    const pinchEffect = ballRadius * clamp(Math.abs(spinRatio) * 0.55, 0, 0.5);
     const ySpread = Math.max(100, vizHeight * 0.76);
     const sampleStep = Math.max(8, Math.round(svgWidth / 36));
     const entrySideX = isMovingRight ? xMax : xMin;
@@ -455,10 +467,15 @@ export function PhysicsMicroscope({
 
   const vectorMinLength = Math.max(16, Math.min(svgWidth, vizHeight) * 0.1);
   const vectorMaxLength = Math.min(svgWidth, vizHeight) * 0.4;
-  const velocityVector = scaleVector(velocityX, -velocityY, 0.85, vectorMinLength, vectorMaxLength);
-  const dragVector = scaleVector(dragX, -dragY, 38, vectorMinLength, vectorMaxLength);
-  const magnusVector = scaleVector(magnusX, -magnusY, 38, vectorMinLength, vectorMaxLength);
-  const gravityVector = scaleVector(gravityX, -gravityY, 38, vectorMinLength, vectorMaxLength);
+  const vectorFrameRotationRad = keepStreamlinesHorizontal ? -(flowAngleDeg * Math.PI / 180) : 0;
+  const velocityDisplay = rotateVector(velocityX, -velocityY, vectorFrameRotationRad);
+  const dragDisplay = rotateVector(dragX, -dragY, vectorFrameRotationRad);
+  const magnusDisplay = rotateVector(magnusX, -magnusY, vectorFrameRotationRad);
+  const gravityDisplay = rotateVector(gravityX, -gravityY, vectorFrameRotationRad);
+  const velocityVector = scaleVector(velocityDisplay.x, velocityDisplay.y, 0.85, vectorMinLength, vectorMaxLength);
+  const dragVector = scaleVector(dragDisplay.x, dragDisplay.y, 38, vectorMinLength, vectorMaxLength);
+  const magnusVector = scaleVector(magnusDisplay.x, magnusDisplay.y, 38, vectorMinLength, vectorMaxLength);
+  const gravityVector = scaleVector(gravityDisplay.x, gravityDisplay.y, 38, vectorMinLength, vectorMaxLength);
   const velocityArrow = buildArrowPath(centerX, centerY, velocityVector.dx, velocityVector.dy);
   const dragArrow = buildArrowPath(centerX, centerY, dragVector.dx, dragVector.dy);
   const magnusArrow = buildArrowPath(centerX, centerY, magnusVector.dx, magnusVector.dy);
@@ -532,21 +549,42 @@ export function PhysicsMicroscope({
           </span>
           <span style={{ color: "#cbd5e1", fontSize: "0.68rem" }}>{describeBall(ballType)}</span>
         </div>
-        <button
-          type="button"
-          onClick={() => setExpanded((prev) => !prev)}
-          style={{
-            border: "1px solid rgba(148,163,184,0.45)",
-            background: "rgba(15,23,42,0.4)",
-            color: "#e2e8f0",
-            borderRadius: 6,
-            fontSize: "0.68rem",
-            padding: "0.15rem 0.42rem",
-            cursor: "pointer",
-          }}
-        >
-          {expanded ? "Collapse" : "Expand"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.25rem",
+              color: "#cbd5e1",
+              fontSize: "0.66rem",
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={keepStreamlinesHorizontal}
+              onChange={(event) => setKeepStreamlinesHorizontal(event.target.checked)}
+              style={{ accentColor: "#22c55e", cursor: "pointer" }}
+            />
+            Keep velocity vector horizontal
+          </label>
+          <button
+            type="button"
+            onClick={() => setExpanded((prev) => !prev)}
+            style={{
+              border: "1px solid rgba(148,163,184,0.45)",
+              background: "rgba(15,23,42,0.4)",
+              color: "#e2e8f0",
+              borderRadius: 6,
+              fontSize: "0.68rem",
+              padding: "0.15rem 0.42rem",
+              cursor: "pointer",
+            }}
+          >
+            {expanded ? "Collapse" : "Expand"}
+          </button>
+        </div>
       </div>
       {expanded && (
         <>
@@ -570,7 +608,7 @@ export function PhysicsMicroscope({
               </radialGradient>
             </defs>
 
-            <g transform={`rotate(${flowAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
+            <g transform={`rotate(${streamlineAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
               <ellipse cx={centerX - ballRadius * 1.3} cy={centerY} rx={ballRadius * 1.4} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />
               <ellipse cx={centerX + ballRadius * 1.6} cy={centerY} rx={ballRadius * 1.8} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
               <ellipse cx={centerX - ballRadius * 0.24} cy={centerY + againstFlowSide * ballRadius * 0.72} rx={ballRadius * 1.14} ry={ballRadius * 0.88} fill={`url(#${gradientsId}-spin-red)`} />
