@@ -16,6 +16,7 @@ export interface PhysicsMicroscopeProps {
   magnusY: number;
   gravityX: number;
   gravityY: number;
+  mass: number;
 }
 
 type VectorKey = "velocity" | "drag" | "magnus" | "gravity";
@@ -296,6 +297,7 @@ export function PhysicsMicroscope({
   magnusY,
   gravityX,
   gravityY,
+  mass,
 }: PhysicsMicroscopeProps) {
   const gradientsId = useId();
   const [rotationDeg, setRotationDeg] = useState(0);
@@ -385,8 +387,16 @@ const streamlines = useMemo(() => {
 
   // backspin+: top, topspin-: bottom
   const withFlowSide = spinRPM >= 0 ? -1 : 1; 
+
+  // NEW: Add mass normalization for kinematic impact
+  const BASEBALL_MASS = 0.145;
+  const massFactor = BASEBALL_MASS / Math.max(mass, 0.001);
+
+  // Get the EFFECTIVE force (Force / Mass ratio)
   const actualMagnusForce = Math.hypot(magnusX, magnusY);
-  const spinStrength = clamp(actualMagnusForce * 0.35, 0, 1.4);
+  const effectiveMagnus = actualMagnusForce * massFactor;
+
+  const spinStrength = clamp(effectiveMagnus * 0.35, 0, 1.4);
   const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.5);
   const sampleStep = Math.max(8, Math.round(svgWidth / 36));
   
@@ -478,7 +488,15 @@ const streamlines = useMemo(() => {
     }
   }
   return lines;
-}, [ballRadius, centerX, centerY, densityRatio, spinRPM, velocityX, velocityY, svgWidth, vizHeight, magnusX, magnusY]);
+}, [ballRadius, centerX, centerY, densityRatio, spinRPM, velocityX, velocityY, svgWidth, vizHeight, magnusX, magnusY, mass]);
+
+  // Adjust the scaling factors based on mass. 
+  // For a Ping Pong ball, this multiplier will be ~54x, 
+  // making the arrows much more prominent.
+  // Use actual projectile mass and normalize to baseball mass for standardization
+  const BASEBALL_MASS = 0.145;
+  const massFactor = BASEBALL_MASS / Math.max(mass, 0.001);
+  const visualScale = 38 * massFactor;
 
   const vectorMinLength = 7;
   const vectorMaxLength = Math.min(svgWidth, vizHeight) * 0.4;
@@ -487,10 +505,12 @@ const streamlines = useMemo(() => {
   const dragDisplay = rotateVector(dragX, -dragY, vectorFrameRotationRad);
   const magnusDisplay = rotateVector(magnusX, -magnusY, vectorFrameRotationRad);
   const gravityDisplay = rotateVector(gravityX, -gravityY, vectorFrameRotationRad);
+
   const velocityVector = scaleVector(velocityDisplay.x, velocityDisplay.y, 1.8, vectorMinLength, vectorMaxLength);
-  const dragVector = scaleVector(dragDisplay.x, dragDisplay.y, 38, vectorMinLength, vectorMaxLength);
-  const magnusVector = scaleVector(magnusDisplay.x, magnusDisplay.y, 38, vectorMinLength, vectorMaxLength);
-  const gravityVector = scaleVector(gravityDisplay.x, gravityDisplay.y, 38, vectorMinLength, vectorMaxLength);
+  const dragVector = scaleVector(dragDisplay.x, dragDisplay.y, visualScale, vectorMinLength, vectorMaxLength);
+  const magnusVector = scaleVector(magnusDisplay.x, magnusDisplay.y, visualScale, vectorMinLength, vectorMaxLength);
+  const gravityVector = scaleVector(gravityDisplay.x, gravityDisplay.y, visualScale, vectorMinLength, vectorMaxLength);
+ 
   const velocityArrow = buildArrowPath(centerX, centerY, velocityVector.dx, velocityVector.dy);
   const dragArrow = buildArrowPath(centerX, centerY, dragVector.dx, dragVector.dy);
   const magnusArrow = buildArrowPath(centerX, centerY, magnusVector.dx, magnusVector.dy);
@@ -502,15 +522,15 @@ const streamlines = useMemo(() => {
     gravity: { x: gravityX, y: gravityY },
   };
 
-  //  Get the actual forces in Newtons from the physics engine
-  const actualDragForce = Math.hypot(dragX, dragY);
-  const actualMagnusForce = Math.hypot(magnusX, magnusY);
+  // Effective Forces drive graphics, not real forces (how the ball "feels" the air)
+  const effectiveDrag = Math.hypot(dragX, dragY) * massFactor;
+  const effectiveMagnus = Math.hypot(magnusX, magnusY) * massFactor;
 
-  //  Map forces to alpha (opacity). 
+  //  Map effective forces to alpha (opacity). 
   // A typical 3N force maps to 0.75 opacity. 0N force = 0 opacity.
   const fadeResistance = 0.6;
-  const dragAlpha = clamp(actualDragForce / (actualDragForce + fadeResistance), 0, 0.75);
-  const magnusAlpha = clamp(actualMagnusForce / (actualMagnusForce + fadeResistance), 0, 0.75);
+  const dragAlpha = clamp(effectiveDrag / (effectiveDrag + fadeResistance), 0, 0.75);
+  const magnusAlpha = clamp(effectiveMagnus / (effectiveMagnus + fadeResistance), 0, 0.75);
 
   //  Determine sides using spinRPM (same safe logic as streamlines)
   const withFlowSide = spinRPM >= 0 ? -1 : 1;
@@ -634,7 +654,7 @@ const streamlines = useMemo(() => {
                 <stop offset="100%" stopColor="rgba(0,0,0,0)" />
               </radialGradient>
             </defs>
-
+            image.png
             <g transform={`rotate(${streamlineAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
               {/* WAKE: Left side (air exits here). Longer shape, low-pressure blue */}
               <ellipse cx={centerX - ballRadius * 1.6} cy={centerY} rx={ballRadius * 1.8} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />

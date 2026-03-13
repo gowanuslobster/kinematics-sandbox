@@ -841,6 +841,7 @@ function App() {
             onHoverPointChange={handleManualAnalysisPointChange}
           />
           <PhysicsMicroscope
+            mass={mass}
             velocity={microscopeVelocity}
             spinRPM={spinRpm}
             ballType={selectedBallType}
