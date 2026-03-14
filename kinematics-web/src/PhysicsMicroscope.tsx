@@ -40,6 +40,7 @@ const VECTOR_META: Array<{ key: VectorKey; label: string; unit: string; color: s
   { key: "gravity", label: "Gravity", unit: "N", color: "#3b82f6" },
 ];
 
+/** Renders a ball-specific seam/surface texture so spin remains visually legible. */
 function SeamTexture({
   ballType,
   cx,
@@ -77,6 +78,10 @@ function SeamTexture({
   );
 }
 
+/**
+ * Floating teaching-oriented visualization that turns the current simulation
+ * state into an airflow, spin, and force "microscope" layered over the chart.
+ */
 export function PhysicsMicroscope({
   spinRPM,
   ballType,
