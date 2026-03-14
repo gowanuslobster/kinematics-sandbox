@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 const PANEL_MIN_WIDTH = 300;
-const PANEL_MIN_HEIGHT = 320;
+const PANEL_MIN_HEIGHT = 360;
 const PANEL_DEFAULT_WIDTH = 550;
-const PANEL_DEFAULT_HEIGHT = 450;
+const PANEL_DEFAULT_HEIGHT = 490;
 const PANEL_PADDING = 10;
 const PANEL_INITIAL_X_OFFSET = 28;
 const PANEL_INITIAL_Y_OFFSET = 62;

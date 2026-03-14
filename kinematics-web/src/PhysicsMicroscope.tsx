@@ -30,9 +30,9 @@ export interface PhysicsMicroscopeProps {
 type VectorKey = "velocity" | "drag" | "magnus" | "gravity";
 
 const PANEL_DEFAULT_WIDTH = 550;
-const PANEL_DEFAULT_HEIGHT = 450;
+const PANEL_DEFAULT_HEIGHT = 490;
 const HEADER_HEIGHT = 38;
-const DETAILS_HEIGHT = 132;
+const DETAILS_HEIGHT = 162;
 
 const VECTOR_META: Array<{ key: VectorKey; label: string; unit: string; color: string }> = [
   { key: "velocity", label: "Velocity", unit: "m/s", color: "#22c55e" },
