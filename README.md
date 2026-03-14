@@ -1,139 +1,88 @@
 # Kinematics Sandbox
 
-An interactive projectile-motion playground for students.
+Interactive projectile-motion simulator focused on intuition:
 
-The project includes:
+- Compare real trajectory vs vacuum behavior
+- Explore drag, spin (Magnus), and air density effects
+- Tune ball mass/radius or use presets (baseball, ping pong, cannonball)
+- Use the **Physics Microscope** to inspect local flow + force vectors
+- Practice in **Challenge Mode** with animated shots
 
-- **React app (primary):** modern UI for experimentation, challenge mode, and trajectory comparison.
-- **Streamlit app (legacy):** earlier Python UI kept for reference.
+Start with the React app. The Streamlit app is legacy.
 
-If you are new here, start with the React app.
+## What To Try First
 
----
+1. **Baseline shot**
+Set `Initial Velocity = 50`, `Launch Angle = 45`, `Gravity = 9.81`, `Drag = 0.50`.
 
-## Quick start
+2. **Pin and compare**
+Click `📌 Pin Current Trajectory`, change velocity/angle, compare paths directly.
 
-### 1) Prerequisites
+3. **Spin experiment**
+Set spin to `+2600` then `-2600` RPM and watch trajectory bend differently.
 
-- **Node.js 20+** and **npm**
-- **Python 3.13+** (only needed if you want to run the legacy Streamlit app)
-- **uv** for Python environment/package management
+4. **Vacuum check**
+Set `Air density = 0` and compare against non-zero air density.
 
-### 2) Run the React app
+5. **Mass sensitivity**
+Switch to Ping Pong preset (or lower mass manually) and observe stronger aerodynamic response.
 
-From the repository root:
+## Quick Start (Users)
+
+Prerequisites:
+
+- Node.js 20+
+- npm
+
+Run:
 
 1. `cd kinematics-web`
 2. `npm install`
 3. `npm run dev`
 4. Open `http://localhost:5173`
 
-You should see the control panel on the left and the trajectory chart on the right.
+## Core Features
 
----
-
-## Intro Tutorial
-
-This is a simple guided flow for first-time users.
-
-### Step A: Learn the baseline shot
-
-1. Stay in **Live Mode**.
-2. Set:
-   - Initial Velocity = `50`
-   - Launch Angle = `45`
-   - Gravity = `9.81`
-   - Drag Coefficient = `0.50`
-3. Observe the current trajectory and target.
-
-### Step B: Compare two trajectories
-
-1. Click **📌 Pin Current Trajectory**.
-2. Change 1-2 controls (for example: velocity and angle).
-3. You now see:
-   - **Pinned trajectory** (reference shot)
-   - **Current trajectory** (new shot)
-4. Hover either line to see a popup with that trajectory's settings.
-
-This makes side-by-side reasoning easier (same target, different settings).
-
-### Step C: Try challenge mode
-
-1. Switch to **Challenge Mode**.
-2. Adjust parameters before firing.
-3. Click **Fire!** to animate a single attempt.
-4. Check whether you hit the target.
-
-### Step D: Explore physics intuition
-
-Try these mini experiments:
-
-- Set launch angle near **45°** and compare range.
-- Increase **drag** and watch trajectory shorten/flatten.
-- Use **spin** to explore lift effects.
-- Set **air density** to `0` to simulate vacuum-like behavior.
-
----
-
-## Controls overview
-
-- **Mode:** Live vs Challenge
-- **Launch:** velocity, angle, gravity
-- **Aerodynamics:** drag coefficient, spin, air density
-- **Ball properties:** mass, radius, presets
-- **Target:** x/y position and diameter
-- **Chart options:** axis bounds
-- **Comparison:** pin/clear a reference trajectory (one pinned + one current)
-
----
+- **Live Mode**: continuous parameter exploration
+- **Challenge Mode**: one-shot animated attempt with hit/miss feedback
+- **Pinned trajectory**: keep one reference path while testing changes
+- **Ball presets + custom values**: presets switch to `custom` if mass/radius/drag are edited
+- **Physics Microscope**:
+  - draggable/resizable overlay panel
+  - collapsed by default
+  - streamline/pressure visualization around ball
+  - force/velocity vectors with per-axis components and magnitudes
+  - optional `Keep velocity vector horizontal` display-frame toggle
 
 ## Troubleshooting
 
-### React app does not start
+- If dev server does not start: rerun `npm install` in `kinematics-web`.
+- If port `5173` is busy: `npm run dev -- --port <new-port>`.
+- There are known pre-existing Storybook/type-check caveats in `src/stories/*`; core dev UI works with `npm run dev`.
 
-- Confirm Node/npm versions.
-- Re-run `npm install` in `kinematics-web`.
-- Ensure port `5173` is free, or run `npm run dev -- --port <new-port>`.
+## Developer Notes
 
-### Build/lint notes
+Repository layout:
 
-There are known pre-existing issues in Storybook/example files:
+- `kinematics-web/` - primary React + TypeScript + Vite frontend
+  - `src/App.tsx` - app state and controls
+  - `src/physics.ts` - simulation model
+  - `src/TrajectoryChart.tsx` - trajectory rendering
+  - `src/PhysicsMicroscope.tsx` - local flow/vector visualization
+  - `src/vectorUtils.ts` - shared vector scaling helpers
+- `app.py` - legacy Streamlit entrypoint
+- `physics_engine.py`, `visualizer.py` - legacy Python modules
 
-- `npm run build` may fail on TypeScript checks in:
-  - `src/stories/Button.tsx`
-  - `src/stories/Header.tsx`
-- `npm run lint` may report pre-existing lint findings.
-
-The core app still runs in dev mode.
-
----
-
-## Legacy Streamlit app (optional)
-
-Run from repo root:
-
-1. `uv run streamlit run app.py --server.headless true`
-2. Open `http://localhost:8501`
-
-This path is maintained for compatibility, but React is the primary experience.
-
----
-
-## Developer notes
-
-### High-level layout
-
-- `kinematics-web/` — React + TypeScript + Vite frontend (primary)
-  - `src/App.tsx` — main UI and state orchestration
-  - `src/physics.ts` — physics simulation and derived metrics
-  - `src/TrajectoryChart.tsx` — Plotly trajectory rendering
-- `app.py` — Streamlit entrypoint (legacy)
-- `physics_engine.py` — Python projectile model (legacy)
-- `visualizer.py` — Plotly builder for Streamlit (legacy)
-
-### Common commands
+Common commands:
 
 - React dev: `cd kinematics-web && npm run dev`
-- React build: `cd kinematics-web && npm run build`
 - React lint: `cd kinematics-web && npm run lint`
-- Streamlit dev: `uv run streamlit run app.py --server.headless true`
+- React build: `cd kinematics-web && npm run build`
+
+## Legacy Streamlit App (Optional)
+
+If needed:
+
+1. Install Python 3.13+ and `uv`
+2. From repo root: `uv run streamlit run app.py --server.headless true`
+3. Open `http://localhost:8501`
