@@ -26,29 +26,32 @@ interface AppSidebarProps {
   onClearPinnedTrajectory: () => void;
 }
 
-const sliderStyle = {
+// The sidebar is modeled as a list of reusable control elements. These style
+// primitives describe either shared element anatomy (label/value/helper/input)
+// or the layout shell for a specific element variant.
+const elementBaseStyle = {
   display: "flex",
   flexDirection: "column" as const,
   gap: "0.25rem",
 };
 
-const labelStyle = {
+const elementLabelStyle = {
   fontSize: "0.875rem",
   fontWeight: 500,
   color: "#374151",
 };
 
-const valueStyle = {
+const elementValueStyle = {
   fontSize: "0.75rem",
   color: "#6b7280",
 };
 
-const inputStyle = {
+const elementInputStyle = {
   width: "100%",
   accentColor: "#2563eb",
 };
 
-const maxInputStyle = {
+const elementMaxInputStyle = {
   width: "3rem",
   padding: "2px 4px",
   fontSize: "0.7rem",
@@ -56,11 +59,79 @@ const maxInputStyle = {
   borderRadius: 4,
 } as const;
 
+const inputElementStyle = {
+  ...elementBaseStyle,
+  marginRight: "0.75rem",
+  marginLeft: "0.25rem",
+};
+
+const pairedInputElementRowStyle = {
+  ...elementBaseStyle,
+  flexDirection: "row" as const,
+  alignItems: "flex-end",
+  gap: "0.5rem",
+  marginRight: "0.75rem",
+  marginLeft: "0.25rem",
+};
+
+const sliderElementStyle = {
+  ...elementBaseStyle,
+};
+
+const elementHelperTextStyle = {
+  ...elementValueStyle,
+  fontSize: "0.7rem",
+};
+
+const numberElementInputStyle = {
+  ...elementInputStyle,
+  padding: "0.35rem 0.5rem",
+};
+
+const elementHeaderRowStyle = {
+  display: "flex",
+  alignItems: "baseline",
+  justifyContent: "space-between",
+  gap: "0.75rem",
+};
+
+const buttonGroupElementStyle = {
+  display: "flex",
+  gap: "0.35rem",
+  flexWrap: "wrap" as const,
+};
+
+const buttonGroupButtonStyle = {
+  padding: "0.3rem 0.4rem",
+  fontSize: "0.72rem",
+  background: "#e5e7eb",
+  border: "1px solid #d1d5db",
+  borderRadius: 6,
+  cursor: "pointer",
+};
+
+/** Lightweight wrapper for sections that group one or more sidebar elements. */
 function SidebarSection({ children }: { children: ReactNode }) {
-  return <div style={sliderStyle}>{children}</div>;
+  return <div style={elementBaseStyle}>{children}</div>;
 }
 
-function NumberInputControl({
+/**
+ * Normalizes number input handling so individual controls only need to define
+ * their validity rule and state update callback.
+ */
+function parseAndApplyNumber(
+  rawValue: string,
+  predicate: (value: number) => boolean,
+  onChange: (value: number) => void,
+) {
+  const nextValue = Number(rawValue);
+  if (!Number.isNaN(nextValue) && predicate(nextValue)) {
+    onChange(nextValue);
+  }
+}
+
+/** Renders a single numeric input element with an optional helper line. */
+function InputControl({
   label,
   value,
   min,
@@ -78,34 +149,27 @@ function NumberInputControl({
   onChange: (value: number) => void;
 }) {
   return (
-    <div
-      style={{
-        ...sliderStyle,
-        marginRight: "0.75rem",
-        marginLeft: "0.25rem",
-      }}
-    >
-      <span style={labelStyle}>{label}</span>
+    <div style={inputElementStyle}>
+      <span style={elementLabelStyle}>{label}</span>
       <input
         type="number"
         min={min}
         step={step}
         value={value}
-        onChange={(event) => {
-          const nextValue = Number(event.target.value);
-          if (!Number.isNaN(nextValue) && nextValue >= min) {
-            onChange(nextValue);
-          }
-        }}
-        style={{ ...inputStyle, padding: "0.35rem 0.5rem" }}
+        onChange={(event) => parseAndApplyNumber(event.target.value, (nextValue) => nextValue >= min, onChange)}
+        style={numberElementInputStyle}
         aria-label={ariaLabel}
       />
-      {helperText ? <span style={{ ...valueStyle, fontSize: "0.7rem" }}>{helperText}</span> : null}
+      {helperText ? <span style={elementHelperTextStyle}>{helperText}</span> : null}
     </div>
   );
 }
 
-function RangeControl({
+/**
+ * Renders the standard slider-based element used for the main projectile
+ * parameters, including optional max-box and footer text.
+ */
+function SliderControl({
   label,
   valueText,
   rangeMin,
@@ -137,9 +201,11 @@ function RangeControl({
   footer?: ReactNode;
 }) {
   return (
-    <SidebarSection>
-      <span style={labelStyle}>{label}</span>
-      <span style={valueStyle}>{valueText}</span>
+    <div style={sliderElementStyle}>
+      <div style={elementHeaderRowStyle}>
+        <span style={elementLabelStyle}>{label}</span>
+        <span style={elementValueStyle}>{valueText}</span>
+      </div>
       <input
         type="range"
         min={rangeMin}
@@ -147,7 +213,7 @@ function RangeControl({
         step={rangeStep}
         value={rangeValue}
         onChange={(event) => onRangeChange(Number(event.target.value))}
-        style={inputStyle}
+        style={elementInputStyle}
         aria-label={rangeAriaLabel}
       />
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "2px" }}>
@@ -164,20 +230,21 @@ function RangeControl({
               step={maxStep}
               value={maxValue}
               onChange={(event) => onMaxChange(Number(event.target.value))}
-              style={maxInputStyle}
+              style={elementMaxInputStyle}
               aria-label={maxAriaLabel}
             />
           </>
         ) : (
-          <span style={{ fontSize: "0.7rem", color: "#6b7280" }}>max: {rangeMax}{label === "Launch Angle" ? "°" : ""}</span>
+          <span style={elementHelperTextStyle}>max: {rangeMax}{label === "Launch Angle" ? "°" : ""}</span>
         )}
       </div>
       {footer}
-    </SidebarSection>
+    </div>
   );
 }
 
-function DualNumberRow({
+/** Renders two related numeric inputs side by side as one logical element row. */
+function PairedInputControl({
   left,
   right,
 }: {
@@ -195,31 +262,17 @@ function DualNumberRow({
   };
 }) {
   return (
-    <div
-      style={{
-        ...sliderStyle,
-        flexDirection: "row",
-        alignItems: "flex-end",
-        gap: "0.5rem",
-        marginRight: "0.75rem",
-        marginLeft: "0.25rem",
-      }}
-    >
+    <div style={pairedInputElementRowStyle}>
       {[left, right].map((field) => (
-        <div key={field.label} style={{ ...sliderStyle, flex: 1, minWidth: 0 }}>
-          <span style={labelStyle}>{field.label}</span>
+        <div key={field.label} style={{ ...elementBaseStyle, flex: 1, minWidth: 0 }}>
+          <span style={elementLabelStyle}>{field.label}</span>
           <input
             type="number"
             min={0.001}
             step="any"
             value={field.value}
-            onChange={(event) => {
-              const nextValue = Number(event.target.value);
-              if (!Number.isNaN(nextValue) && nextValue > 0) {
-                field.onChange(nextValue);
-              }
-            }}
-            style={{ ...inputStyle, padding: "0.35rem 0.5rem" }}
+            onChange={(event) => parseAndApplyNumber(event.target.value, (nextValue) => nextValue > 0, field.onChange)}
+            style={numberElementInputStyle}
             aria-label={field.ariaLabel}
           />
         </div>
@@ -228,6 +281,7 @@ function DualNumberRow({
   );
 }
 
+/** Sidebar for simulation controls, mode-specific actions, and chart limits. */
 export function AppSidebar({
   mode,
   isAnimating,
@@ -310,13 +364,11 @@ export function AppSidebar({
           >
             Clear pinned trajectory
           </button>
-          {pinnedTrajectoryActive ? (
-            <span style={{ ...valueStyle, fontSize: "0.7rem" }}>Pinned trajectory active</span>
-          ) : null}
+          {pinnedTrajectoryActive ? <span style={elementHelperTextStyle}>Pinned trajectory active</span> : null}
         </SidebarSection>
       )}
 
-      <RangeControl
+      <SliderControl
         label="Initial Velocity"
         valueText={`${values.initialVelocity} m/s`}
         rangeMin={0}
@@ -331,7 +383,7 @@ export function AppSidebar({
         onMaxChange={actions.updateVelocityMax}
       />
 
-      <RangeControl
+      <SliderControl
         label="Launch Angle"
         valueText={`${values.launchAngle}°`}
         rangeMin={0}
@@ -341,7 +393,7 @@ export function AppSidebar({
         onRangeChange={actions.setLaunchAngle}
       />
 
-      <RangeControl
+      <SliderControl
         label="Gravity"
         valueText={`${values.gravity} m/s²`}
         rangeMin={0}
@@ -356,13 +408,13 @@ export function AppSidebar({
         maxAriaLabel="Gravity slider maximum"
         onMaxChange={actions.updateGravityMax}
         footer={
-          <span style={{ ...valueStyle, fontSize: "0.7rem" }}>
+          <span style={elementHelperTextStyle}>
             Moon 1.62 · Mars 3.7 · Earth 9.81 · Saturn 10.4 · Jupiter 24.8 m/s²
           </span>
         }
       />
 
-      <RangeControl
+      <SliderControl
         label="Drag coefficient (C_d)"
         valueText={values.dragCoefficient.toFixed(2)}
         rangeMin={0}
@@ -376,40 +428,27 @@ export function AppSidebar({
         maxStep={0.01}
         maxAriaLabel="Drag coefficient maximum"
         onMaxChange={actions.updateDragMax}
-        footer={<span style={{ ...valueStyle, fontSize: "0.7rem" }}>Typical sphere ≈ 0.5</span>}
+        footer={<span style={elementHelperTextStyle}>Typical sphere ≈ 0.5</span>}
       />
 
-      <div
-        style={{
-          ...sliderStyle,
-          marginRight: "0.75rem",
-          marginLeft: "0.25rem",
-        }}
-      >
-        <span style={labelStyle}>Ball preset</span>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+      <div style={inputElementStyle}>
+        <span style={elementLabelStyle}>Ball preset</span>
+        <div style={buttonGroupElementStyle}>
           {derived.ballPresetOptions.map((preset) => (
             <button
               key={preset.key}
               type="button"
               onClick={() => actions.applyBallPreset(preset.key)}
-              style={{
-                padding: "0.35rem 0.5rem",
-                fontSize: "0.75rem",
-                background: "#e5e7eb",
-                border: "1px solid #d1d5db",
-                borderRadius: 6,
-                cursor: "pointer",
-              }}
+              style={buttonGroupButtonStyle}
             >
               {preset.label}
             </button>
           ))}
         </div>
-        <span style={{ ...valueStyle, fontSize: "0.7rem" }}>Selected: {derived.selectedBallLabel}</span>
+        <span style={elementHelperTextStyle}>Selected: {derived.selectedBallLabel}</span>
       </div>
 
-      <NumberInputControl
+      <InputControl
         label="Mass (kg)"
         value={values.mass}
         min={0.0001}
@@ -418,7 +457,7 @@ export function AppSidebar({
         onChange={actions.setMass}
       />
 
-      <NumberInputControl
+      <InputControl
         label="Radius (m)"
         value={values.radius}
         min={0.001}
@@ -427,7 +466,7 @@ export function AppSidebar({
         onChange={actions.setRadius}
       />
 
-      <RangeControl
+      <SliderControl
         label="Spin (RPM)"
         valueText={`${values.spinRpm} (backspin +)`}
         rangeMin={-3000}
@@ -438,7 +477,7 @@ export function AppSidebar({
         onRangeChange={actions.setSpinRpm}
       />
 
-      <NumberInputControl
+      <InputControl
         label="Air density (kg/m³)"
         value={values.airDensity}
         min={0}
@@ -448,7 +487,7 @@ export function AppSidebar({
         onChange={actions.setAirDensity}
       />
 
-      <DualNumberRow
+      <PairedInputControl
         left={{
           label: "Target X",
           value: values.targetX,
@@ -463,7 +502,7 @@ export function AppSidebar({
         }}
       />
 
-      <NumberInputControl
+      <InputControl
         label="Target diameter"
         value={values.targetDiameter}
         min={0.001}
@@ -472,49 +511,28 @@ export function AppSidebar({
         onChange={actions.setTargetDiameter}
       />
 
-      <div
-        style={{
-          ...sliderStyle,
-          flexDirection: "row",
-          alignItems: "flex-end",
-          gap: "0.75rem",
-          marginTop: "0.5rem",
-          marginRight: "0.75rem",
-          marginBottom: "0.25rem",
-          marginLeft: "0.25rem",
-        }}
-      >
-        <div style={{ ...sliderStyle, flex: 1, minWidth: 0 }}>
-          <span style={labelStyle}>X-axis max</span>
+      <div style={pairedInputElementRowStyle}>
+        <div style={{ ...elementBaseStyle, flex: 1, minWidth: 0 }}>
+          <span style={elementLabelStyle}>X-axis max</span>
           <input
             type="number"
             min={0.001}
             step="any"
             value={values.xAxisMax}
-            onChange={(event) => {
-              const nextValue = Number(event.target.value);
-              if (!Number.isNaN(nextValue) && nextValue > 0) {
-                actions.setXAxisMax(nextValue);
-              }
-            }}
-            style={{ ...inputStyle, padding: "0.35rem 0.5rem" }}
+            onChange={(event) => parseAndApplyNumber(event.target.value, (nextValue) => nextValue > 0, actions.setXAxisMax)}
+            style={numberElementInputStyle}
             aria-label="X-axis maximum"
           />
         </div>
-        <div style={{ ...sliderStyle, flex: 1, minWidth: 0 }}>
-          <span style={labelStyle}>Y-axis max</span>
+        <div style={{ ...elementBaseStyle, flex: 1, minWidth: 0 }}>
+          <span style={elementLabelStyle}>Y-axis max</span>
           <input
             type="number"
             min={0.001}
             step="any"
             value={values.yAxisMax}
-            onChange={(event) => {
-              const nextValue = Number(event.target.value);
-              if (!Number.isNaN(nextValue) && nextValue > 0) {
-                actions.setYAxisMax(nextValue);
-              }
-            }}
-            style={{ ...inputStyle, padding: "0.35rem 0.5rem" }}
+            onChange={(event) => parseAndApplyNumber(event.target.value, (nextValue) => nextValue > 0, actions.setYAxisMax)}
+            style={numberElementInputStyle}
             aria-label="Y-axis maximum"
           />
         </div>
