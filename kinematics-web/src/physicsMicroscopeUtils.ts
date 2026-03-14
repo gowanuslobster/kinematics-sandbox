@@ -50,9 +50,18 @@ export function rotateVector(x: number, y: number, angleRad: number): { x: numbe
   };
 }
 
+/** Simple 2D point used while constructing SVG geometry for the microscope. */
 export interface Point {
   x: number;
   y: number;
+}
+
+/** Final streamline SVG paths plus opacity for one rendered airflow layer. */
+export interface StreamlinePath {
+  id: string;
+  main: string;
+  wake: string;
+  alpha: number;
 }
 
 /** Converts sampled points into a smooth quadratic SVG path for streamlines. */
@@ -76,4 +85,141 @@ export function buildSmoothPath(points: Point[]): string {
 export function getMassNormalizationFactor(mass: number): number {
   const BASEBALL_MASS = 0.145;
   return BASEBALL_MASS / Math.max(mass, 0.001);
+}
+
+/**
+ * Builds the decorative airflow streamlines that visually suggest suction,
+ * pressure, and wake behavior around the ball. This is a visual approximation,
+ * not a physical flow solver.
+ */
+export function buildStreamlines({
+  ballRadius,
+  centerX,
+  centerY,
+  densityRatio,
+  magnusY,
+  massNormalizationFactor,
+  spinRPM,
+  svgWidth,
+  velocityX,
+  velocityY,
+  vizHeight,
+}: {
+  ballRadius: number;
+  centerX: number;
+  centerY: number;
+  densityRatio: number;
+  magnusY: number;
+  massNormalizationFactor: number;
+  spinRPM: number;
+  svgWidth: number;
+  velocityX: number;
+  velocityY: number;
+  vizHeight: number;
+}): StreamlinePath[] {
+  const lines: StreamlinePath[] = [];
+
+  // Scale the number of visible layers with panel height while keeping a sane range.
+  const totalCount = clamp(Math.round(vizHeight / 18), 10, 18);
+  const halfCount = Math.floor(totalCount / 2);
+  // Streamlines enter from the right edge and leave toward the left-side wake.
+  const xMin = -svgWidth * 0.48;
+  const xMax = svgWidth * 0.48;
+  // Backspin makes the upper side the suction side; topspin flips that relationship.
+  const withFlowSide = spinRPM >= 0 ? -1 : 1;
+
+  // Use a mass-normalized Magnus proxy so lightweight balls can show stronger visual bending.
+  const actualMagnusForce = Math.abs(magnusY);
+  const effectiveMagnus = actualMagnusForce * massNormalizationFactor;
+  const spinStrength = clamp(effectiveMagnus * 0.35, 0, 1.4);
+  // Faster airflow increases wake wobble and slightly sharpens the streamline presentation.
+  const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.5);
+  const sampleStep = Math.max(8, Math.round(svgWidth / 36));
+  const baseSpacing = 22;
+
+  // Build mirrored layers above and below the ball, then let spin break the symmetry.
+  for (const side of [-1, 1]) {
+    const isSuctionSide = side === withFlowSide;
+
+    // The innermost line sits closer on the suction side and farther away on the pressure side.
+    const baseClearance = 1.18;
+    const suctionGap = Math.max(1.04, baseClearance - (spinStrength * 0.35));
+    const pressureGap = baseClearance + (spinStrength * 0.50);
+    const anchorClearance = ballRadius * (isSuctionSide ? suctionGap : pressureGap);
+
+    // Layer spacing compresses on the suction side and spreads on the pressure side.
+    const layerSpacing = isSuctionSide
+      ? Math.max(4, baseSpacing * (1 - spinStrength * 0.5))
+      : baseSpacing * (1 + spinStrength * 0.9);
+
+    // Bend width controls how early incoming flow starts curving around the ball.
+    const bendWidth = isSuctionSide
+      ? ballRadius * (1.8 - spinStrength * 0.35)
+      : ballRadius * (1.8 + spinStrength * 0.5);
+
+    // Track the last layer peak so each new layer can stack outward from it.
+    let previousTransitionY = 0;
+
+    for (let layer = 0; layer < halfCount; layer++) {
+      // Start each layer farther from center as we move outward from the ball.
+      const yBase = side * (layer === 0 ? 1 : layer * baseSpacing);
+
+      let transitionY: number;
+      if (layer === 0) {
+        transitionY = side * anchorClearance;
+      } else {
+        // Subsequent layers inherit the previous peak and then add side-specific spacing.
+        transitionY = previousTransitionY + (side * layerSpacing);
+      }
+      previousTransitionY = transitionY;
+
+      // Entry points describe how flow curves from the right edge into the ball region.
+      const entryPoints: Point[] = [];
+      for (let x = xMax; x >= 0; x -= sampleStep) {
+        const distToCenter = Math.abs(x);
+        const entryInfluence = Math.exp(-Math.pow(distToCenter / bendWidth, 2));
+        const y = yBase + (transitionY - yBase) * entryInfluence;
+        entryPoints.push({ x: centerX + x, y: centerY + y });
+      }
+
+      if (entryPoints[entryPoints.length - 1]?.x !== centerX) {
+        entryPoints.push({ x: centerX, y: centerY + transitionY });
+      } else {
+        entryPoints[entryPoints.length - 1] = { x: centerX, y: centerY + transitionY };
+      }
+
+      // Wake points extend leftward and add wobble to suggest turbulent separation.
+      const wakePoints: Point[] = [];
+      for (let x = 0; x >= xMin; x -= sampleStep) {
+        const wakeNorm = clamp(Math.abs(x) / Math.max(1, Math.abs(xMin)), 0, 1);
+        const wakeInfluence = Math.exp(-Math.pow(Math.abs(x) / bendWidth, 2));
+        const baseWake = yBase + (transitionY - yBase) * wakeInfluence;
+
+        const wakeWobble = Math.sin((x / (ballRadius * 1.02)) + (layer * 0.72))
+          * (0.72 + flowStrength * 1.02)
+          * Math.pow(wakeNorm, 0.9)
+          * (0.6 + 0.8 * densityRatio);
+
+        const y = baseWake + wakeWobble;
+        wakePoints.push({ x: centerX + x, y: centerY + y });
+      }
+
+      if (wakePoints[0]) {
+        wakePoints[0] = { x: centerX, y: centerY + transitionY };
+      }
+
+      // Fade outer layers so the most important airflow remains visually closest to the ball.
+      const absYNorm = layer / 8;
+      const alpha = clamp((0.36 + (1 - absYNorm) * 0.6) * densityRatio, 0.1, 1);
+
+      lines.push({
+        id: `line-${side > 0 ? "bottom" : "top"}-${layer}`,
+        main: buildSmoothPath(entryPoints),
+        wake: buildSmoothPath(wakePoints),
+        alpha,
+      });
+    }
+  }
+
+  return lines;
 }

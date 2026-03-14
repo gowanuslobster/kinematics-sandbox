@@ -4,12 +4,11 @@ import { scaleVector } from "./vectorUtils";
 import { useDraggableResizableWindow } from "./useDraggableResizableWindow";
 import {
   buildArrowPath,
-  buildSmoothPath,
+  buildStreamlines,
   clamp,
   describeBall,
   getMassNormalizationFactor,
   rotateVector,
-  type Point,
 } from "./physicsMicroscopeUtils";
 
 export type MicroscopeBallType = "baseball" | "pingPong" | "cannonball" | "custom";
@@ -166,116 +165,32 @@ export function PhysicsMicroscope({
   // they tighten on the suction side, spread on the pressure side, and add wake
   // wobble so the microscope conveys why Magnus lift appears.
   const streamlines = useMemo(() => {
-  const lines: Array<{ id: string; main: string; wake: string; alpha: number }> = [];
-  
-  // Dynamically calculate lines based on panel height (max ~18 total, so 9 per side)
-  const totalCount = clamp(Math.round(vizHeight / 18), 10, 18);
-  const halfCount = Math.floor(totalCount / 2);
-
-  const xMin = -svgWidth * 0.48;
-  const xMax = svgWidth * 0.48;
-
-  // backspin+: top, topspin-: bottom
-  const withFlowSide = spinRPM >= 0 ? -1 : 1; 
-
-  // Use a mass-normalized Magnus proxy so lightweight balls show stronger
-  // visible bending when the same force has a larger kinematic effect.
-  const actualMagnusForce = Math.hypot(magnusX, magnusY);
-  const effectiveMagnus = actualMagnusForce * massNormalizationFactor;
-
-  const spinStrength = clamp(effectiveMagnus * 0.35, 0, 1.4);
-  const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.5);
-  const sampleStep = Math.max(8, Math.round(svgWidth / 36));
-  
-  // The standard gap between lines at the far right edge of the screen
-  const baseSpacing = 22; 
-
-  // Generate Top lines (side = -1) then Bottom lines (side = 1)
-  for (const side of [-1, 1]) {
-    const isSuctionSide = (side === withFlowSide);
-
-    // ANCHOR CLEARANCE: How closely the innermost line hugs the ball
-    const baseClearance = 1.18;
-    const suctionGap = Math.max(1.04, baseClearance - (spinStrength * 0.35));
-    const pressureGap = baseClearance + (spinStrength * 0.50);
-    const anchorClearance = ballRadius * (isSuctionSide ? suctionGap : pressureGap);
-
-    // LAYER SPACING: The gap between stacked lines at the ball's center.
-    // Suction lines pack tightly together. Pressure lines spread far apart.
-    const layerSpacing = isSuctionSide 
-      ? Math.max(4, baseSpacing * (1 - spinStrength * 0.5)) 
-      : baseSpacing * (1 + spinStrength * 0.9);
-
-    // BEND WIDTH: How far out in front of the ball the lines start to curve.
-    // Suction side dives sharply. Pressure side bulges gently.
-    const bendWidth = isSuctionSide 
-      ? ballRadius * (1.8 - spinStrength * 0.35) 
-      : ballRadius * (1.8 + spinStrength * 0.5);
-
-    let previousTransitionY = 0; // Tracks the peak of the layer below it
-
-    for (let layer = 0; layer < halfCount; layer++) {
-      // yBase is where the line enters the screen at the far right edge
-      // Layer 0 starts near center. Layer 1 starts baseSpacing pixels further out.
-      const yBase = side * (layer === 0 ? 1 : layer * baseSpacing);
-      
-      // transitionY is the peak curve exactly above/below the center of the ball
-      let transitionY: number;
-      if (layer === 0) {
-        transitionY = side * anchorClearance;
-      } else {
-        // Stack this line directly on top of the previous line's peak + the gap
-        transitionY = previousTransitionY + (side * layerSpacing);
-      }
-      previousTransitionY = transitionY; // Save for the next loop iteration
-
-      // Generate the smooth curve from entry edge to the center peak
-      const entryPoints: Point[] = [];
-      for (let x = xMax; x >= 0; x -= sampleStep) {
-        const distToCenter = Math.abs(x);
-        const entryInfluence = Math.exp(-Math.pow(distToCenter / bendWidth, 2));
-        const y = yBase + (transitionY - yBase) * entryInfluence;
-        entryPoints.push({ x: centerX + x, y: centerY + y });
-      }
-      if (entryPoints[entryPoints.length - 1]?.x !== centerX) {
-        entryPoints.push({ x: centerX, y: centerY + transitionY });
-      } else {
-        entryPoints[entryPoints.length - 1] = { x: centerX, y: centerY + transitionY };
-      }
-
-      // Generate the wake curve and wobble
-      const wakePoints: Point[] = [];
-      for (let x = 0; x >= xMin; x -= sampleStep) {
-        const wakeNorm = clamp(Math.abs(x) / Math.max(1, Math.abs(xMin)), 0, 1);
-        const wakeInfluence = Math.exp(-Math.pow(Math.abs(x) / bendWidth, 2));
-        const baseWake = yBase + (transitionY - yBase) * wakeInfluence;
-        
-        const wakeWobble = Math.sin((x / (ballRadius * 1.02)) + (layer * 0.72))
-          * (0.72 + flowStrength * 1.02)
-          * Math.pow(wakeNorm, 0.9)
-          * (0.6 + 0.8 * densityRatio);
-          
-        const y = baseWake + wakeWobble;
-        wakePoints.push({ x: centerX + x, y: centerY + y });
-      }
-      if (wakePoints[0]) {
-        wakePoints[0] = { x: centerX, y: centerY + transitionY };
-      }
-
-      // Fade outer layers so the densest flow stays visually closest to the ball.
-      const absYNorm = layer / 8;
-      const alpha = clamp((0.36 + (1 - absYNorm) * 0.6) * densityRatio, 0.1, 1);
-      
-      lines.push({
-        id: `line-${side > 0 ? 'bottom' : 'top'}-${layer}`,
-        main: buildSmoothPath(entryPoints),
-        wake: buildSmoothPath(wakePoints),
-        alpha,
-      });
-    }
-  }
-  return lines;
-  }, [ballRadius, centerX, centerY, densityRatio, spinRPM, velocityX, velocityY, svgWidth, vizHeight, magnusX, magnusY, massNormalizationFactor]);
+    return buildStreamlines({
+      ballRadius,
+      centerX,
+      centerY,
+      densityRatio,
+      magnusY,
+      massNormalizationFactor,
+      spinRPM,
+      svgWidth,
+      velocityX,
+      velocityY,
+      vizHeight,
+    });
+  }, [
+    ballRadius,
+    centerX,
+    centerY,
+    densityRatio,
+    magnusY,
+    massNormalizationFactor,
+    spinRPM,
+    svgWidth,
+    velocityX,
+    velocityY,
+    vizHeight,
+  ]);
 
   // Vector display state converts physical vectors into readable SVG arrows.
   // These scales are deliberately non-literal so small forces remain visible.
@@ -339,6 +254,7 @@ export function PhysicsMicroscope({
   };
 
   return (
+    // Floating microscope panel positioned independently above the main chart.
     <div
       style={{
         position: "fixed",
@@ -356,6 +272,7 @@ export function PhysicsMicroscope({
         userSelect: "none",
       }}
     >
+      {/* Draggable header with panel title and quick microscope controls. */}
       <div
         onPointerDown={(event) => {
           if (event.target instanceof HTMLElement && event.target.closest("button")) {
@@ -420,7 +337,9 @@ export function PhysicsMicroscope({
       </div>
       {expanded && (
         <>
+          {/* Main microscope visualization: pressure field, streamlines, ball, and vector arrows. */}
           <svg width="100%" height={vizHeight} viewBox={`0 0 ${svgWidth} ${vizHeight}`} preserveAspectRatio="xMidYMid meet">
+            {/* SVG gradients define the soft pressure highlights layered under the streamlines. */}
             <defs>
               <radialGradient id={`${gradientsId}-front-red`} cx="50%" cy="50%" r="55%">
                 <stop offset="0%" stopColor={frontRedColor} />
@@ -472,12 +391,14 @@ export function PhysicsMicroscope({
               ))}
             </g>
 
+            {/* Ball body and seam texture stay centered while the seam rotates to show spin. */}
             <circle cx={centerX} cy={centerY} r={ballRadius} fill={ballFill} stroke="rgba(15,23,42,0.7)" strokeWidth={2} />
             <g transform={`rotate(${displayedRotationDeg.toFixed(2)} ${centerX} ${centerY})`}>
               <SeamTexture ballType={ballType} cx={centerX} cy={centerY} radius={ballRadius} />
             </g>
             <circle cx={centerX - ballRadius * 0.26} cy={centerY - ballRadius * 0.28} r={ballRadius * 0.2} fill="rgba(255,255,255,0.4)" />
 
+            {/* Optional vector overlays show the currently enabled force/velocity arrows. */}
             {visibleVectors.velocity && velocityArrow.length > 0 && (
               <path d={velocityArrow} stroke="#22c55e" strokeWidth={2.3} fill="none" strokeLinecap="round" />
             )}
@@ -491,8 +412,9 @@ export function PhysicsMicroscope({
               <path d={gravityArrow} stroke="#3b82f6" strokeWidth={2.3} fill="none" strokeLinecap="round" />
             )}
           </svg>
-            <div
-              style={{
+          {/* Lower details panel lists vector components and toggles each overlay on/off. */}
+          <div
+            style={{
               height: DETAILS_HEIGHT,
               padding: "0.5rem 0.65rem 0.6rem",
               borderTop: "1px solid rgba(148,163,184,0.3)",
@@ -546,6 +468,7 @@ export function PhysicsMicroscope({
               );
             })}
           </div>
+          {/* Bottom-right resize handle for changing the microscope panel size. */}
           <button
             type="button"
             onPointerDown={beginResize}
