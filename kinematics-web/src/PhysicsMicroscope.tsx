@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState, useId } from "react";
 import { AIR_DENSITY_SEA_LEVEL } from "./physics";
-import { scaleVector } from "./vectorUtils";
 import { useDraggableResizableWindow } from "./useDraggableResizableWindow";
 import {
-  buildArrowPath,
   buildStreamlines,
   clamp,
   describeBall,
   getMassNormalizationFactor,
-  rotateVector,
+  getVectorDisplayState,
 } from "./physicsMicroscopeUtils";
 
 export type MicroscopeBallType = "baseball" | "pingPong" | "cannonball" | "custom";
@@ -192,59 +190,53 @@ export function PhysicsMicroscope({
     vizHeight,
   ]);
 
-  // Vector display state converts physical vectors into readable SVG arrows.
-  // These scales are deliberately non-literal so small forces remain visible.
-  const visualScale = 38 * massNormalizationFactor;
+  // Vector display state converts physical vectors into readable SVG arrows and highlight colors.
+  const {
+    velocityArrow,
+    dragArrow,
+    magnusArrow,
+    gravityArrow,
+    vectorComponents,
+    frontRedColor,
+    wakeBlueColor,
+    spinRedColor,
+    spinBlueColor,
+    withFlowSide,
+    againstFlowSide,
+  } = useMemo(() => getVectorDisplayState({
+    centerX,
+    centerY,
+    dragX,
+    dragY,
+    gravityX,
+    gravityY,
+    keepStreamlinesHorizontal,
+    magnusX,
+    magnusY,
+    massNormalizationFactor,
+    spinRPM,
+    svgWidth,
+    velocityX,
+    velocityY,
+    vizHeight,
+  }), [
+    centerX,
+    centerY,
+    dragX,
+    dragY,
+    gravityX,
+    gravityY,
+    keepStreamlinesHorizontal,
+    magnusX,
+    magnusY,
+    massNormalizationFactor,
+    spinRPM,
+    svgWidth,
+    velocityX,
+    velocityY,
+    vizHeight,
+  ]);
 
-  const vectorMinLength = 7;
-  const vectorMaxLength = Math.min(svgWidth, vizHeight) * 0.4;
-  const vectorFrameRotationRad = keepStreamlinesHorizontal ? -(flowAngleDeg * Math.PI / 180) : 0;
-  const velocityDisplay = rotateVector(velocityX, -velocityY, vectorFrameRotationRad);
-  const dragDisplay = rotateVector(dragX, -dragY, vectorFrameRotationRad);
-  const magnusDisplay = rotateVector(magnusX, -magnusY, vectorFrameRotationRad);
-  const gravityDisplay = rotateVector(gravityX, -gravityY, vectorFrameRotationRad);
-
-  const velocityVector = scaleVector(velocityDisplay.x, velocityDisplay.y, 1.8, vectorMinLength, vectorMaxLength);
-  const dragVector = scaleVector(dragDisplay.x, dragDisplay.y, visualScale, vectorMinLength, vectorMaxLength);
-  const magnusVector = scaleVector(magnusDisplay.x, magnusDisplay.y, visualScale, vectorMinLength, vectorMaxLength);
-  const gravityVector = scaleVector(gravityDisplay.x, gravityDisplay.y, visualScale, vectorMinLength, vectorMaxLength);
- 
-  const velocityArrow = buildArrowPath(centerX, centerY, velocityVector.dx, velocityVector.dy);
-  const dragArrow = buildArrowPath(centerX, centerY, dragVector.dx, dragVector.dy);
-  const magnusArrow = buildArrowPath(centerX, centerY, magnusVector.dx, magnusVector.dy);
-  const gravityArrow = buildArrowPath(centerX, centerY, gravityVector.dx, gravityVector.dy);
-  const vectorComponents: Record<VectorKey, { x: number; y: number }> = {
-    velocity: { x: velocityX, y: velocityY },
-    drag: { x: dragX, y: dragY },
-    magnus: { x: magnusX, y: magnusY },
-    gravity: { x: gravityX, y: gravityY },
-  };
-
-  // These mass-normalized values drive opacity only; they are visual proxies,
-  // not new forces being fed back into the simulation.
-  const effectiveDrag = Math.hypot(dragX, dragY) * massNormalizationFactor;
-  const effectiveMagnus = Math.hypot(magnusX, magnusY) * massNormalizationFactor;
-
-  // Map stronger visual proxies to higher opacity while keeping weak effects visible.
-  const fadeResistance = 0.6;
-  const dragAlpha = clamp(effectiveDrag / (effectiveDrag + fadeResistance), 0, 0.75);
-  const magnusAlpha = clamp(effectiveMagnus / (effectiveMagnus + fadeResistance), 0, 0.75);
-
-  // Match the pressure highlights to the same suction/pressure side convention
-  // used by the streamline generator.
-  const withFlowSide = spinRPM >= 0 ? -1 : 1;
-  const againstFlowSide = -withFlowSide;
-
-  // Apply the computed opacity values to the layered pressure highlights.
-  const pressureFrontRedAlpha = dragAlpha;
-  const pressureWakeBlueAlpha = dragAlpha * 0.8; // Wake is naturally a bit fainter
-  const pressureSpinRedAlpha = magnusAlpha;
-  const pressureSpinBlueAlpha = magnusAlpha;
-
-  const frontRedColor = `rgba(239,68,68,${pressureFrontRedAlpha.toFixed(3)})`;
-  const wakeBlueColor = `rgba(59,130,246,${pressureWakeBlueAlpha.toFixed(3)})`;
-  const spinRedColor = `rgba(239,68,68,${pressureSpinRedAlpha.toFixed(3)})`;
-  const spinBlueColor = `rgba(59,130,246,${pressureSpinBlueAlpha.toFixed(3)})`;
   const ballFill = ballType === "cannonball" ? "#6b7280" : ballType === "pingPong" ? "#fde68a" : "#f8fafc";
   const displayedRotationDeg = Math.abs(spinRPM) < 0.01 ? 0 : rotationDeg;
 

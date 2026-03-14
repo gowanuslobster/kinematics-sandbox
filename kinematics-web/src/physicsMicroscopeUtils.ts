@@ -1,3 +1,4 @@
+import { scaleVector } from "./vectorUtils";
 import type { MicroscopeBallType } from "./PhysicsMicroscope";
 
 /** Shared numeric clamp used by the microscope's layout and visual scaling code. */
@@ -64,6 +65,21 @@ export interface StreamlinePath {
   alpha: number;
 }
 
+/** Bundles the arrow, legend, and pressure-highlight values needed by the microscope UI. */
+export interface VectorDisplayState {
+  velocityArrow: string;
+  dragArrow: string;
+  magnusArrow: string;
+  gravityArrow: string;
+  vectorComponents: Record<"velocity" | "drag" | "magnus" | "gravity", { x: number; y: number }>;
+  frontRedColor: string;
+  wakeBlueColor: string;
+  spinRedColor: string;
+  spinBlueColor: string;
+  withFlowSide: number;
+  againstFlowSide: number;
+}
+
 /** Converts sampled points into a smooth quadratic SVG path for streamlines. */
 export function buildSmoothPath(points: Point[]): string {
   if (points.length < 2) return "";
@@ -85,6 +101,97 @@ export function buildSmoothPath(points: Point[]): string {
 export function getMassNormalizationFactor(mass: number): number {
   const BASEBALL_MASS = 0.145;
   return BASEBALL_MASS / Math.max(mass, 0.001);
+}
+
+/**
+ * Converts the live physics vectors into readable microscope overlays,
+ * including arrow paths, legend data, and pressure-highlight colors.
+ */
+export function getVectorDisplayState({
+  centerX,
+  centerY,
+  dragX,
+  dragY,
+  gravityX,
+  gravityY,
+  keepStreamlinesHorizontal,
+  magnusX,
+  magnusY,
+  massNormalizationFactor,
+  spinRPM,
+  svgWidth,
+  velocityX,
+  velocityY,
+  vizHeight,
+}: {
+  centerX: number;
+  centerY: number;
+  dragX: number;
+  dragY: number;
+  gravityX: number;
+  gravityY: number;
+  keepStreamlinesHorizontal: boolean;
+  magnusX: number;
+  magnusY: number;
+  massNormalizationFactor: number;
+  spinRPM: number;
+  svgWidth: number;
+  velocityX: number;
+  velocityY: number;
+  vizHeight: number;
+}): VectorDisplayState {
+  // Rebuild the flow angle in display coordinates so vectors can align with the chosen frame.
+  const flowVectorX = Math.abs(velocityX) < 0.01 && Math.abs(velocityY) < 0.01 ? 1 : velocityX;
+  const flowVectorY = Math.abs(velocityX) < 0.01 && Math.abs(velocityY) < 0.01 ? 0 : -velocityY;
+  const flowAngleDeg = (Math.atan2(flowVectorY, flowVectorX) * 180) / Math.PI;
+
+  // These scales are intentionally visual, not literal, so weak forces stay readable.
+  const visualScale = 38 * massNormalizationFactor;
+  const vectorMinLength = 7;
+  const vectorMaxLength = Math.min(svgWidth, vizHeight) * 0.4;
+  const vectorFrameRotationRad = keepStreamlinesHorizontal ? -(flowAngleDeg * Math.PI / 180) : 0;
+
+  // Rotate all vectors into the microscope's current display frame before scaling them.
+  const velocityDisplay = rotateVector(velocityX, -velocityY, vectorFrameRotationRad);
+  const dragDisplay = rotateVector(dragX, -dragY, vectorFrameRotationRad);
+  const magnusDisplay = rotateVector(magnusX, -magnusY, vectorFrameRotationRad);
+  const gravityDisplay = rotateVector(gravityX, -gravityY, vectorFrameRotationRad);
+
+  // Convert raw vectors into clamped on-screen arrows with a readable minimum length.
+  const velocityVector = scaleVector(velocityDisplay.x, velocityDisplay.y, 1.8, vectorMinLength, vectorMaxLength);
+  const dragVector = scaleVector(dragDisplay.x, dragDisplay.y, visualScale, vectorMinLength, vectorMaxLength);
+  const magnusVector = scaleVector(magnusDisplay.x, magnusDisplay.y, visualScale, vectorMinLength, vectorMaxLength);
+  const gravityVector = scaleVector(gravityDisplay.x, gravityDisplay.y, visualScale, vectorMinLength, vectorMaxLength);
+
+  // These mass-normalized magnitudes only drive visual emphasis such as opacity.
+  const effectiveDrag = Math.hypot(dragX, dragY) * massNormalizationFactor;
+  const effectiveMagnus = Math.hypot(magnusX, magnusY) * massNormalizationFactor;
+  const fadeResistance = 0.6;
+  const dragAlpha = clamp(effectiveDrag / (effectiveDrag + fadeResistance), 0, 0.75);
+  const magnusAlpha = clamp(effectiveMagnus / (effectiveMagnus + fadeResistance), 0, 0.75);
+
+  // Spin direction decides which side gets the suction-side versus pressure-side highlight.
+  const withFlowSide = spinRPM >= 0 ? -1 : 1;
+  const againstFlowSide = -withFlowSide;
+
+  return {
+    velocityArrow: buildArrowPath(centerX, centerY, velocityVector.dx, velocityVector.dy),
+    dragArrow: buildArrowPath(centerX, centerY, dragVector.dx, dragVector.dy),
+    magnusArrow: buildArrowPath(centerX, centerY, magnusVector.dx, magnusVector.dy),
+    gravityArrow: buildArrowPath(centerX, centerY, gravityVector.dx, gravityVector.dy),
+    vectorComponents: {
+      velocity: { x: velocityX, y: velocityY },
+      drag: { x: dragX, y: dragY },
+      magnus: { x: magnusX, y: magnusY },
+      gravity: { x: gravityX, y: gravityY },
+    },
+    frontRedColor: `rgba(239,68,68,${dragAlpha.toFixed(3)})`,
+    wakeBlueColor: `rgba(59,130,246,${(dragAlpha * 0.8).toFixed(3)})`,
+    spinRedColor: `rgba(239,68,68,${magnusAlpha.toFixed(3)})`,
+    spinBlueColor: `rgba(59,130,246,${magnusAlpha.toFixed(3)})`,
+    withFlowSide,
+    againstFlowSide,
+  };
 }
 
 /**
