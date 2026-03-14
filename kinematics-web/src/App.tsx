@@ -134,6 +134,7 @@ function App() {
   // Challenge playback derives visible points and analysis state from the latest trajectory.
   const {
     activeAnalysisPoint,
+    analysisSource,
     challengeComplete,
     challengeShot,
     displayHit,
@@ -149,6 +150,10 @@ function App() {
   const launchAngleRad = (values.launchAngle * Math.PI) / 180;
   const defaultVelocityX = Math.max(values.initialVelocity, 0) * Math.cos(launchAngleRad);
   const defaultVelocityY = Math.max(values.initialVelocity, 0) * Math.sin(launchAngleRad);
+
+  // Only show motion effects when the trajectory is animating or user is manually analyzing a point.
+  const microscopeShouldShowMotionEffects =
+    isAnimating || analysisSource === "manual";
 
   const hitHint = useMemo(
     () => getHitHint(hit, points, values.targetX, values.targetY),
@@ -255,18 +260,19 @@ function App() {
               onHoverPointChange={handleManualAnalysisPointChange}
             />
             <PhysicsMicroscope
+              showMotionEffects={microscopeShouldShowMotionEffects}
               mass={values.mass}
-              spinRPM={values.spinRpm}
+              spinRPM={microscopeShouldShowMotionEffects ? values.spinRpm : 0}
               ballType={values.selectedBallType}
               airDensity={values.airDensity}
-              velocityX={activeAnalysisPoint?.vx ?? defaultVelocityX}
-              velocityY={activeAnalysisPoint?.vy ?? defaultVelocityY}
-              dragX={activeAnalysisPoint?.dragX ?? 0}
-              dragY={activeAnalysisPoint?.dragY ?? 0}
-              magnusX={activeAnalysisPoint?.magnusX ?? 0}
-              magnusY={activeAnalysisPoint?.magnusY ?? 0}
-              gravityX={activeAnalysisPoint?.gravX ?? 0}
-              gravityY={activeAnalysisPoint?.gravY ?? -(values.mass * values.gravity)}
+              velocityX={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.vx ?? defaultVelocityX) : 0}
+              velocityY={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.vy ?? defaultVelocityY) : 0}
+              dragX={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.dragX ?? 0) : 0}
+              dragY={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.dragY ?? 0) : 0}
+              magnusX={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.magnusX ?? 0) : 0}
+              magnusY={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.magnusY ?? 0) : 0}
+              gravityX={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.gravX ?? 0) : 0}
+              gravityY={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.gravY ?? -(values.mass * values.gravity)) : 0}
             />
           </div>
 

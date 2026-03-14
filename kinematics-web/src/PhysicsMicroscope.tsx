@@ -12,6 +12,7 @@ import {
 export type MicroscopeBallType = "baseball" | "pingPong" | "cannonball" | "custom";
 
 export interface PhysicsMicroscopeProps {
+  showMotionEffects?: boolean;
   spinRPM: number;
   ballType: MicroscopeBallType;
   airDensity: number;
@@ -83,6 +84,7 @@ function SeamTexture({
  * state into an airflow, spin, and force "microscope" layered over the chart.
  */
 export function PhysicsMicroscope({
+  showMotionEffects = true,
   spinRPM,
   ballType,
   airDensity,
@@ -243,7 +245,7 @@ export function PhysicsMicroscope({
   ]);
 
   const ballFill = ballType === "cannonball" ? "#6b7280" : ballType === "pingPong" ? "#fde68a" : "#f8fafc";
-  const displayedRotationDeg = Math.abs(spinRPM) < 0.01 ? 0 : rotationDeg;
+  const displayedRotationDeg = showMotionEffects && Math.abs(spinRPM) >= 0.01 ? rotationDeg : 0;
 
   // Legend toggles control which vectors are overlaid on the microscope view.
   const toggleVector = (key: VectorKey) => {
@@ -358,34 +360,38 @@ export function PhysicsMicroscope({
             {/* Pressure-field highlights sit behind the streamlines and suggest
                 where air compresses, separates, and shifts under spin. */}
             <g transform={`rotate(${streamlineAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
-              {/* WAKE: Left side (air exits here). Longer shape, low-pressure blue */}
-              <ellipse cx={centerX - ballRadius * 1.6} cy={centerY} rx={ballRadius * 1.8} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
-              
-              {/* FRONT: Right side (air crashes here). Tighter shape, high-pressure red */}
-              <ellipse cx={centerX + ballRadius * 1.3} cy={centerY} rx={ballRadius * 1.4} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />              
+              {showMotionEffects ? (
+                <>
+                  {/* WAKE: Left side (air exits here). Longer shape, low-pressure blue */}
+                  <ellipse cx={centerX - ballRadius * 1.6} cy={centerY} rx={ballRadius * 1.8} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
 
-              {/* SPIN: Center lines (red for backspin, blue for topspin). Tighter shape, high-pressure */}
-              <ellipse cx={centerX - ballRadius * 0.24} cy={centerY + againstFlowSide * ballRadius * 0.72} rx={ballRadius * 1.14} ry={ballRadius * 0.88} fill={`url(#${gradientsId}-spin-red)`} />
-              <ellipse cx={centerX + ballRadius * 0.34} cy={centerY + withFlowSide * ballRadius * 0.72} rx={ballRadius * 1.2} ry={ballRadius * 0.92} fill={`url(#${gradientsId}-spin-blue)`} />
-              {streamlines.map((line) => (
-                <g key={line.id}>
-                  <path
-                    d={line.main}
-                    stroke={`rgba(186,230,253,${(0.9 * line.alpha).toFixed(3)})`}
-                    strokeWidth={1.55}
-                    fill="none"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d={line.wake}
-                    stroke={`rgba(186,230,253,${(0.5 * line.alpha).toFixed(3)})`}
-                    strokeWidth={1.45}
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeDasharray="7 6"
-                  />
-                </g>
-              ))}
+                  {/* FRONT: Right side (air crashes here). Tighter shape, high-pressure red */}
+                  <ellipse cx={centerX + ballRadius * 1.3} cy={centerY} rx={ballRadius * 1.4} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />
+
+                  {/* SPIN: Center lines (red for backspin, blue for topspin). Tighter shape, high-pressure */}
+                  <ellipse cx={centerX - ballRadius * 0.24} cy={centerY + againstFlowSide * ballRadius * 0.72} rx={ballRadius * 1.14} ry={ballRadius * 0.88} fill={`url(#${gradientsId}-spin-red)`} />
+                  <ellipse cx={centerX + ballRadius * 0.34} cy={centerY + withFlowSide * ballRadius * 0.72} rx={ballRadius * 1.2} ry={ballRadius * 0.92} fill={`url(#${gradientsId}-spin-blue)`} />
+                  {streamlines.map((line) => (
+                    <g key={line.id}>
+                      <path
+                        d={line.main}
+                        stroke={`rgba(186,230,253,${(0.9 * line.alpha).toFixed(3)})`}
+                        strokeWidth={1.55}
+                        fill="none"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d={line.wake}
+                        stroke={`rgba(186,230,253,${(0.5 * line.alpha).toFixed(3)})`}
+                        strokeWidth={1.45}
+                        fill="none"
+                        strokeLinecap="round"
+                        strokeDasharray="7 6"
+                      />
+                    </g>
+                  ))}
+                </>
+              ) : null}
             </g>
 
             {/* Ball body and seam texture stay centered while the seam rotates to show spin. */}
@@ -396,16 +402,16 @@ export function PhysicsMicroscope({
             <circle cx={centerX - ballRadius * 0.26} cy={centerY - ballRadius * 0.28} r={ballRadius * 0.2} fill="rgba(255,255,255,0.4)" />
 
             {/* Optional vector overlays show the currently enabled force/velocity arrows. */}
-            {visibleVectors.velocity && velocityArrow.length > 0 && (
+            {showMotionEffects && visibleVectors.velocity && velocityArrow.length > 0 && (
               <path d={velocityArrow} stroke="#22c55e" strokeWidth={2.3} fill="none" strokeLinecap="round" />
             )}
-            {visibleVectors.drag && dragArrow.length > 0 && (
+            {showMotionEffects && visibleVectors.drag && dragArrow.length > 0 && (
               <path d={dragArrow} stroke="#ef4444" strokeWidth={2.3} fill="none" strokeLinecap="round" />
             )}
-            {visibleVectors.magnus && magnusArrow.length > 0 && (
+            {showMotionEffects && visibleVectors.magnus && magnusArrow.length > 0 && (
               <path d={magnusArrow} stroke="#a855f7" strokeWidth={2.3} fill="none" strokeLinecap="round" />
             )}
-            {visibleVectors.gravity && gravityArrow.length > 0 && (
+            {showMotionEffects && visibleVectors.gravity && gravityArrow.length > 0 && (
               <path d={gravityArrow} stroke="#3b82f6" strokeWidth={2.3} fill="none" strokeLinecap="round" />
             )}
           </svg>
