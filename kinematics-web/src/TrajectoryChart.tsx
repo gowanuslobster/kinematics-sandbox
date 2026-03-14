@@ -24,7 +24,10 @@ export interface TrajectoryChartProps {
   pinnedPath?: TrajectoryPoint[];
   vacuumPath?: TrajectoryPoint[];
   activeAnalysisPoint?: TrajectoryPoint | null;
+  selectedAnalysisPoint?: TrajectoryPoint | null;
   onHoverPointChange?: (point: TrajectoryPoint | null) => void;
+  onSelectedPointChange?: (point: TrajectoryPoint | null) => void;
+  selectionEnabled?: boolean;
 }
 
 interface PlotShape {
@@ -324,7 +327,10 @@ export function TrajectoryChart({
   pinnedPath,
   vacuumPath,
   activeAnalysisPoint,
+  selectedAnalysisPoint,
   onHoverPointChange,
+  onSelectedPointChange,
+  selectionEnabled = false,
 }: TrajectoryChartProps) {
   const plotContainerRef = useRef<HTMLDivElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -332,7 +338,7 @@ export function TrajectoryChart({
     hoverIndex != null && hoverIndex >= 0 && hoverIndex < points.length
       ? points[hoverIndex]
       : null;
-  const analysisPoint = activeAnalysisPoint ?? manualHoveredPoint;
+  const analysisPoint = selectedAnalysisPoint ?? activeAnalysisPoint ?? manualHoveredPoint;
 
   // Forward hover ownership to the parent so challenge playback can decide
   // whether the chart or the autoplay animation controls the analysis point.
@@ -394,6 +400,47 @@ export function TrajectoryChart({
     }));
   };
 
+  const handlePlotClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!selectionEnabled || points.length === 0) return;
+    const container = plotContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const localX = event.clientX - rect.left;
+    const localY = event.clientY - rect.top;
+    const plotWidth = rect.width - PLOT_MARGIN.l - PLOT_MARGIN.r;
+    const plotHeight = rect.height - PLOT_MARGIN.t - PLOT_MARGIN.b;
+    if (plotWidth <= 0 || plotHeight <= 0) return;
+    if (
+      localX < PLOT_MARGIN.l
+      || localX > PLOT_MARGIN.l + plotWidth
+      || localY < PLOT_MARGIN.t
+      || localY > PLOT_MARGIN.t + plotHeight
+    ) {
+      return;
+    }
+
+    const nextIndex = findClosestHoverIndex({
+      localX,
+      localY,
+      plotHeight,
+      plotWidth,
+      points,
+      xRange,
+      yRange,
+    });
+    if (nextIndex == null) {
+      onSelectedPointChange?.(null);
+      return;
+    }
+
+    const nextPoint = points[nextIndex];
+    if (selectedAnalysisPoint === nextPoint) {
+      onSelectedPointChange?.(null);
+      return;
+    }
+    onSelectedPointChange?.(nextPoint);
+  };
+
   return (
     // Plotly renders the chart while a transparent overlay captures custom hover behavior.
     <div
@@ -425,6 +472,7 @@ export function TrajectoryChart({
       <div
         onMouseMove={handlePlotMouseMove}
         onMouseLeave={() => setHoverIndex(null)}
+        onClick={handlePlotClick}
         style={{
           position: "absolute",
           inset: 0,

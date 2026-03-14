@@ -83,6 +83,7 @@ function ModeButton({
 function App() {
   // UI-only state that does not belong to simulation input or playback hooks.
   const [mode, setMode] = useState<Mode>("live");
+  const [selectedAnalysisPoint, setSelectedAnalysisPoint] = useState<TrajectoryPoint | null>(null);
   const [pinnedTrajectory, setPinnedTrajectory] = useState<{
     points: TrajectoryPoint[];
   } | null>(null);
@@ -150,10 +151,17 @@ function App() {
   const launchAngleRad = (values.launchAngle * Math.PI) / 180;
   const defaultVelocityX = Math.max(values.initialVelocity, 0) * Math.cos(launchAngleRad);
   const defaultVelocityY = Math.max(values.initialVelocity, 0) * Math.sin(launchAngleRad);
+  const validSelectedAnalysisPoint =
+    selectedAnalysisPoint != null && points.includes(selectedAnalysisPoint)
+      ? selectedAnalysisPoint
+      : null;
+  const combinedActiveAnalysisPoint = validSelectedAnalysisPoint ?? activeAnalysisPoint;
+  const chartSelectionEnabled =
+    mode === "live" || (mode === "challenge" && challengeShot != null && !isAnimating);
 
   // Only show motion effects when the trajectory is animating or user is manually analyzing a point.
   const microscopeShouldShowMotionEffects =
-    isAnimating || analysisSource === "manual";
+    isAnimating || analysisSource === "manual" || validSelectedAnalysisPoint != null;
 
   const hitHint = useMemo(
     () => getHitHint(hit, points, values.targetX, values.targetY),
@@ -172,14 +180,21 @@ function App() {
 
   // Switching back to live mode clears any in-progress challenge playback state.
   const enterLiveMode = () => {
+    setSelectedAnalysisPoint(null);
     setMode("live");
     resetForLiveMode();
   };
 
   // Challenge mode keeps the latest controls but resets hover/analysis state.
   const enterChallengeMode = () => {
+    setSelectedAnalysisPoint(null);
     setMode("challenge");
     resetForChallengeMode();
+  };
+
+  const handleFire = () => {
+    setSelectedAnalysisPoint(null);
+    fire();
   };
 
   return (
@@ -219,7 +234,7 @@ function App() {
           values={values}
           derived={derived}
           actions={actions}
-          onFire={fire}
+          onFire={handleFire}
           onPinCurrentTrajectory={handlePinCurrentTrajectory}
           onClearPinnedTrajectory={handleClearPinnedTrajectory}
         />
@@ -257,7 +272,10 @@ function App() {
               pinnedPath={mode === "live" ? (pinnedTrajectory?.points ?? undefined) : undefined}
               vacuumPath={mode === "live" ? (vacuumPath ?? undefined) : undefined}
               activeAnalysisPoint={activeAnalysisPoint}
+              selectedAnalysisPoint={validSelectedAnalysisPoint}
               onHoverPointChange={handleManualAnalysisPointChange}
+              onSelectedPointChange={setSelectedAnalysisPoint}
+              selectionEnabled={chartSelectionEnabled}
             />
             <PhysicsMicroscope
               showMotionEffects={microscopeShouldShowMotionEffects}
@@ -265,14 +283,14 @@ function App() {
               spinRPM={microscopeShouldShowMotionEffects ? values.spinRpm : 0}
               ballType={values.selectedBallType}
               airDensity={values.airDensity}
-              velocityX={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.vx ?? defaultVelocityX) : 0}
-              velocityY={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.vy ?? defaultVelocityY) : 0}
-              dragX={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.dragX ?? 0) : 0}
-              dragY={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.dragY ?? 0) : 0}
-              magnusX={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.magnusX ?? 0) : 0}
-              magnusY={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.magnusY ?? 0) : 0}
-              gravityX={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.gravX ?? 0) : 0}
-              gravityY={microscopeShouldShowMotionEffects ? (activeAnalysisPoint?.gravY ?? -(values.mass * values.gravity)) : 0}
+              velocityX={microscopeShouldShowMotionEffects ? (combinedActiveAnalysisPoint?.vx ?? defaultVelocityX) : 0}
+              velocityY={microscopeShouldShowMotionEffects ? (combinedActiveAnalysisPoint?.vy ?? defaultVelocityY) : 0}
+              dragX={microscopeShouldShowMotionEffects ? (combinedActiveAnalysisPoint?.dragX ?? 0) : 0}
+              dragY={microscopeShouldShowMotionEffects ? (combinedActiveAnalysisPoint?.dragY ?? 0) : 0}
+              magnusX={microscopeShouldShowMotionEffects ? (combinedActiveAnalysisPoint?.magnusX ?? 0) : 0}
+              magnusY={microscopeShouldShowMotionEffects ? (combinedActiveAnalysisPoint?.magnusY ?? 0) : 0}
+              gravityX={microscopeShouldShowMotionEffects ? (combinedActiveAnalysisPoint?.gravX ?? 0) : 0}
+              gravityY={microscopeShouldShowMotionEffects ? (combinedActiveAnalysisPoint?.gravY ?? -(values.mass * values.gravity)) : 0}
             />
           </div>
 
