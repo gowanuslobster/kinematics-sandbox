@@ -435,11 +435,49 @@ export function PhysicsMicroscope({
               {/* Each legend row reports raw vector components/magnitude and doubles
                   as a visibility toggle for that vector overlay in the SVG. */}
               <div style={{ gridColumn: "1 / span 2", fontWeight: 700, color: "#f8fafc", marginBottom: "0.15rem" }}>
-                Vector Legend (click to toggle)
+                Feature Legend (click vectors to toggle)
               </div>
-            {VECTOR_META.map((meta) => {
-              const xComp = vectorComponents[meta.key].x;
-              const yComp = vectorComponents[meta.key].y;
+              <div
+                style={{
+                  gridColumn: "1 / span 2",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.55rem",
+                  marginBottom: "0.2rem",
+                  color: "#cbd5e1",
+                  fontSize: `${Math.max(detailsFontSizeRem - 0.03, 0.68).toFixed(3)}rem`,
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem" }}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: "rgba(239,68,68,0.8)",
+                      boxShadow: "0 0 10px rgba(239,68,68,0.55)",
+                      flexShrink: 0,
+                    }}
+                  />
+                  Red glow = higher pressure
+                </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem" }}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: "rgba(59,130,246,0.8)",
+                      boxShadow: "0 0 10px rgba(59,130,246,0.55)",
+                      flexShrink: 0,
+                    }}
+                  />
+                  Blue glow = lower pressure
+                </span>
+              </div>
+              {VECTOR_META.map((meta) => {
+                const xComp = vectorComponents[meta.key].x;
+                const yComp = vectorComponents[meta.key].y;
               const magnitude = Math.hypot(xComp, yComp);
               return (
                 <button
