@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AIR_DENSITY_SEA_LEVEL, calculateTrajectory, type SimulationParams } from "./physics";
 
+/** Supplies stable defaults so each test only overrides the parameter it cares about. */
 function makeParams(overrides: Partial<SimulationParams> = {}): SimulationParams {
   return {
     initialVelocity: 50,

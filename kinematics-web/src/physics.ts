@@ -21,10 +21,12 @@ const RHO_EPSILON = 1e-10;
 /** Max time (s) for zero-gravity straight-line trajectory sampling. */
 const ZERO_G_MAX_TIME = 1000;
 
+/** Treats extremely small gravity values as true zero for stability checks. */
 function isZeroG(g: number): boolean {
   return g < G_EPSILON;
 }
 
+/** Treats extremely small air densities as vacuum for drag/Magnus checks. */
 function isVacuum(rho: number): boolean {
   return rho < RHO_EPSILON;
 }
@@ -34,6 +36,7 @@ function normalizeGravity(gravity: number): number {
   return isZeroG(gravity) ? 0 : Math.max(gravity, MIN_NON_ZERO_GRAVITY);
 }
 
+/** Splits launch speed and angle into horizontal and vertical components. */
 function velocityComponents(initialVelocity: number, angleDeg: number): { v0x: number; v0y: number } {
   const angleRad = toRad(angleDeg);
   return {
@@ -125,11 +128,16 @@ export interface SimulationResult {
   rangeActual: number;
 }
 
+/** Converts degrees to radians for trigonometric launch calculations. */
 function toRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
 
-/** Vacuum (analytic) trajectory: with g > 0 uses parabola; with g ≈ 0 uses straight line x = v0x*t, y = v0y*t. */
+/**
+ * Builds the analytic vacuum trajectory used both for pure vacuum runs and for
+ * the comparison path shown alongside drag-enabled trajectories. With g > 0 it
+ * samples a parabola; with g ≈ 0 it samples straight-line motion.
+ */
 function analyticalTrajectory(
   v0: number,
   angleDeg: number,
@@ -221,7 +229,8 @@ function vacuumMetrics(v0: number, angleDeg: number, g: number) {
 }
 
 /**
- * Advanced ballistics: Symplectic Euler-Cromer with drag and Magnus.
+ * Computes the main sampled trajectory when air effects are active using
+ * Symplectic Euler-Cromer integration with drag and Magnus forces.
  * - Drag: F_d = -(1/2) ρ |v|² C_d A v̂  →  -(1/2) ρ C_d A |v| (vx, vy)
  * - Magnus: F_L ∝ ω × v (backspin = +ω out of page) → F_L = 2 ρ π r³ ω (-vy, vx)
  * Integration: a = (F_g + F_d + F_L)/m; v = v + a·dt; pos = pos + v·dt
@@ -324,9 +333,9 @@ function trajectoryWithDrag(params: SimulationParams): { points: TrajectoryPoint
 }
 
 /**
- * Pure function: compute trajectory and derived metrics from simulation parameters.
- * One-way: params in → result out; no side effects.
- * Uses vacuum (analytic) when air density is effectively zero; otherwise uses advanced ballistics.
+ * Pure public entry point that picks between the analytic vacuum path and the
+ * drag/Magnus integrator, then packages the sampled path and comparable
+ * summary metrics with no side effects.
  */
 export function calculateTrajectory(params: SimulationParams): SimulationResult {
   const g = normalizeGravity(params.gravity);
