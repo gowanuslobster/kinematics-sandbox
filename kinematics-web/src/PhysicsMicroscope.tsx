@@ -246,6 +246,9 @@ export function PhysicsMicroscope({
 
   const ballFill = ballType === "cannonball" ? "#6b7280" : ballType === "pingPong" ? "#fde68a" : "#f8fafc";
   const displayedRotationDeg = showMotionEffects && Math.abs(spinRPM) >= 0.01 ? rotationDeg : 0;
+  const showSpinIndicator = Math.abs(spinRPM) >= 0.01;
+  const spinDirectionArrow = spinRPM >= 0 ? "↺" : "↻";
+  const spinDirectionLabel = spinRPM >= 0 ? "counterclockwise" : "clockwise";
 
   // Legend toggles control which vectors are overlaid on the microscope view.
   const toggleVector = (key: VectorKey) => {
@@ -292,10 +295,12 @@ export function PhysicsMicroscope({
       >
         <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", minWidth: 0 }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22d3ee", flexShrink: 0 }} />
-          <span style={{ color: "#f8fafc", fontWeight: 700, fontSize: "0.78rem", letterSpacing: "0.02em" }}>
-            Physics Dashboard
-          </span>
-          <span style={{ color: "#cbd5e1", fontSize: "0.68rem" }}>{describeBall(ballType)}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", minWidth: 0 }}>
+            <span style={{ color: "#f8fafc", fontWeight: 700, fontSize: "0.78rem", letterSpacing: "0.02em" }}>
+              Physics Dashboard
+            </span>
+            <span style={{ color: "#cbd5e1", fontSize: "0.68rem" }}>{describeBall(ballType)}</span>
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <label
@@ -357,6 +362,33 @@ export function PhysicsMicroscope({
                 <stop offset="100%" stopColor="rgba(0,0,0,0)" />
               </radialGradient>
             </defs>
+            {/* Spin readout stays inside the main visualization whenever the microscope is in motion-analysis mode. */}
+            {showSpinIndicator ? (
+              <g
+                aria-label={`Spin ${Math.abs(spinRPM).toFixed(0)} RPM ${spinDirectionLabel}`}
+              >
+                <rect
+                  x={12}
+                  y={12}
+                  rx={8}
+                  ry={8}
+                  width={118}
+                  height={26}
+                  fill="rgba(15,23,42,0.45)"
+                  stroke="rgba(191,219,254,0.28)"
+                />
+                <text
+                  x={22}
+                  y={30}
+                  fill="#bfdbfe"
+                  fontSize="14"
+                  fontWeight="700"
+                  fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+                >
+                  {spinDirectionArrow} {Math.abs(spinRPM).toFixed(0)} RPM
+                </text>
+              </g>
+            ) : null}
             {/* Pressure-field highlights sit behind the streamlines and suggest
                 where air compresses, separates, and shifts under spin. */}
             <g transform={`rotate(${streamlineAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>

@@ -6,8 +6,13 @@ This app lets students explore projectile motion with:
 
 - live parameter control
 - challenge mode with shot animation
+- pause/resume playback in challenge mode
 - drag + spin + air-density effects
 - target hit feedback
+- clickable trajectory inspection and persistent point selection
+- trajectory progress slider for stepping through the current path
+- adjustable challenge playback speed
+- interactive force/pressure microscope
 - pinned trajectory comparison (one pinned trajectory + one current trajectory)
 
 ## Quick start
@@ -25,8 +30,10 @@ From the repository root:
 2. Adjust `Initial Velocity`, `Launch Angle`, `Gravity`, and `Drag coefficient`.
 3. Click **Pin Current Trajectory**.
 4. Change launch parameters again and compare the new path to the pinned one.
-5. Hover either trajectory line to inspect the exact settings used for that shot.
-6. Switch to **Challenge Mode** and click **Fire!** to animate an attempt.
+5. Hover or click the trajectory line to inspect a specific point and see the microscope update.
+6. Move the `Trajectory progress` slider to step through the current path without hovering.
+7. Switch to **Challenge Mode** and click **Fire!** to animate an attempt.
+8. Use **Pause** / **Resume** during challenge playback, or change `Animation speed` to reveal the shot faster.
 
 ## Scripts
 
@@ -67,8 +74,12 @@ These issues are outside normal runtime usage; `npm run dev` works for local dev
 ## Code map
 
 - `src/App.tsx` - app state, controls, mode switching, and orchestration
+- `src/AppSidebar.tsx` - sidebar controls and mode-specific actions
 - `src/physics.ts` - physics simulation and derived metrics
-- `src/TrajectoryChart.tsx` - Plotly rendering and hover display
+- `src/TrajectoryChart.tsx` - Plotly rendering, trajectory interaction, and playback controls
+- `src/PhysicsMicroscope.tsx` - floating airflow/force visualization for the active point
+- `src/useChallengePlayback.ts` - challenge-mode playback, pause/resume, and reveal state
+- `src/useSimulationControls.ts` - simulation control state and derived sidebar values
 - `src/physics.test.ts` - physics unit tests
 - `vitest.unit.config.ts` - standalone unit test config
 
