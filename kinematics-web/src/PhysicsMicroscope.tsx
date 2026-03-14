@@ -1,6 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useId, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useState, useId } from "react";
 import { AIR_DENSITY_SEA_LEVEL } from "./physics";
 import { scaleVector } from "./vectorUtils";
+import { useDraggableResizableWindow } from "./useDraggableResizableWindow";
+import {
+  buildArrowPath,
+  buildSmoothPath,
+  clamp,
+  describeBall,
+  getMassNormalizationFactor,
+  rotateVector,
+  type Point,
+} from "./physicsMicroscopeUtils";
 
 export type MicroscopeBallType = "baseball" | "pingPong" | "cannonball" | "custom";
 
@@ -21,13 +31,8 @@ export interface PhysicsMicroscopeProps {
 
 type VectorKey = "velocity" | "drag" | "magnus" | "gravity";
 
-const PANEL_MIN_WIDTH = 300;
-const PANEL_MIN_HEIGHT = 320;
 const PANEL_DEFAULT_WIDTH = 550;
 const PANEL_DEFAULT_HEIGHT = 450;
-const PANEL_PADDING = 10;
-const PANEL_INITIAL_X_OFFSET = 28;
-const PANEL_INITIAL_Y_OFFSET = 62;
 const HEADER_HEIGHT = 38;
 const DETAILS_HEIGHT = 132;
 
@@ -37,77 +42,6 @@ const VECTOR_META: Array<{ key: VectorKey; label: string; unit: string; color: s
   { key: "magnus", label: "Magnus", unit: "N", color: "#a855f7" },
   { key: "gravity", label: "Gravity", unit: "N", color: "#3b82f6" },
 ];
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function getViewport() {
-  if (typeof window === "undefined") {
-    return { width: 1400, height: 900 };
-  }
-  return { width: window.innerWidth, height: window.innerHeight };
-}
-
-function describeBall(ballType: MicroscopeBallType): string {
-  switch (ballType) {
-    case "baseball":
-      return "Baseball";
-    case "pingPong":
-      return "Ping Pong";
-    case "cannonball":
-      return "Cannonball";
-    default:
-      return "Custom";
-  }
-}
-
-function buildArrowPath(cx: number, cy: number, dx: number, dy: number): string {
-  const length = Math.hypot(dx, dy);
-  if (length <= 1e-10) return "";
-  const tx = cx + dx;
-  const ty = cy + dy;
-  const ux = dx / length;
-  const uy = dy / length;
-  const headLength = Math.max(6, length * 0.3);
-  const headWidth = Math.max(3.5, length * 0.18);
-  const baseX = tx - ux * headLength;
-  const baseY = ty - uy * headLength;
-  const px = -uy;
-  const py = ux;
-  const leftX = baseX + px * headWidth;
-  const leftY = baseY + py * headWidth;
-  const rightX = baseX - px * headWidth;
-  const rightY = baseY - py * headWidth;
-  return `M ${cx},${cy} L ${tx},${ty} M ${tx},${ty} L ${leftX},${leftY} M ${tx},${ty} L ${rightX},${rightY}`;
-}
-
-function rotateVector(x: number, y: number, angleRad: number): { x: number; y: number } {
-  const cosA = Math.cos(angleRad);
-  const sinA = Math.sin(angleRad);
-  return {
-    x: (x * cosA) - (y * sinA),
-    y: (x * sinA) + (y * cosA),
-  };
-}
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-function buildSmoothPath(points: Point[]): string {
-  if (points.length < 2) return "";
-  let d = `M ${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
-  for (let i = 1; i < points.length - 1; i++) {
-    const midX = (points[i].x + points[i + 1].x) * 0.5;
-    const midY = (points[i].y + points[i + 1].y) * 0.5;
-    d += ` Q ${points[i].x.toFixed(1)},${points[i].y.toFixed(1)} ${midX.toFixed(1)},${midY.toFixed(1)}`;
-  }
-  const last = points[points.length - 1];
-  d += ` T ${last.x.toFixed(1)},${last.y.toFixed(1)}`;
-  return d;
-}
 
 function SeamTexture({
   ballType,
@@ -146,118 +80,6 @@ function SeamTexture({
   );
 }
 
-function useDraggableResizableWindow() {
-  const [size, setSize] = useState(() => {
-    const viewport = getViewport();
-    return {
-      width: clamp(PANEL_DEFAULT_WIDTH, PANEL_MIN_WIDTH, viewport.width - PANEL_PADDING * 2),
-      height: clamp(PANEL_DEFAULT_HEIGHT, PANEL_MIN_HEIGHT, viewport.height - PANEL_PADDING * 2),
-    };
-  });
-  const [position, setPosition] = useState(() => {
-    const viewport = getViewport();
-    const width = clamp(PANEL_DEFAULT_WIDTH, PANEL_MIN_WIDTH, viewport.width - PANEL_PADDING * 2);
-    const height = clamp(PANEL_DEFAULT_HEIGHT, PANEL_MIN_HEIGHT, viewport.height - PANEL_PADDING * 2);
-    return {
-      x: clamp(viewport.width - width - PANEL_INITIAL_X_OFFSET, PANEL_PADDING, viewport.width - width - PANEL_PADDING),
-      y: clamp(PANEL_INITIAL_Y_OFFSET, PANEL_PADDING, viewport.height - height - PANEL_PADDING),
-    };
-  });
-  const actionRef = useRef<{
-    type: "drag" | "resize";
-    startX: number;
-    startY: number;
-    startPosX: number;
-    startPosY: number;
-    startWidth: number;
-    startHeight: number;
-  } | null>(null);
-
-  const clampSize = useCallback((width: number, height: number) => {
-    const viewport = getViewport();
-    return {
-      width: clamp(width, PANEL_MIN_WIDTH, Math.max(PANEL_MIN_WIDTH, viewport.width - PANEL_PADDING * 2)),
-      height: clamp(height, PANEL_MIN_HEIGHT, Math.max(PANEL_MIN_HEIGHT, viewport.height - PANEL_PADDING * 2)),
-    };
-  }, []);
-
-  const clampPosition = useCallback((x: number, y: number, panelSize = size) => {
-    const viewport = getViewport();
-    return {
-      x: clamp(x, PANEL_PADDING, Math.max(PANEL_PADDING, viewport.width - panelSize.width - PANEL_PADDING)),
-      y: clamp(y, PANEL_PADDING, Math.max(PANEL_PADDING, viewport.height - panelSize.height - PANEL_PADDING)),
-    };
-  }, [size]);
-
-  const beginDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    event.preventDefault();
-    actionRef.current = {
-      type: "drag",
-      startX: event.clientX,
-      startY: event.clientY,
-      startPosX: position.x,
-      startPosY: position.y,
-      startWidth: size.width,
-      startHeight: size.height,
-    };
-  }, [position.x, position.y, size.height, size.width]);
-
-  const beginResize = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    actionRef.current = {
-      type: "resize",
-      startX: event.clientX,
-      startY: event.clientY,
-      startPosX: position.x,
-      startPosY: position.y,
-      startWidth: size.width,
-      startHeight: size.height,
-    };
-  }, [position.x, position.y, size.height, size.width]);
-
-  useEffect(() => {
-    const onPointerMove = (event: PointerEvent) => {
-      const action = actionRef.current;
-      if (!action) return;
-      if (action.type === "drag") {
-        const nextX = action.startPosX + (event.clientX - action.startX);
-        const nextY = action.startPosY + (event.clientY - action.startY);
-        setPosition(clampPosition(nextX, nextY));
-      } else {
-        const proposedWidth = action.startWidth + (event.clientX - action.startX);
-        const proposedHeight = action.startHeight + (event.clientY - action.startY);
-        const nextSize = clampSize(proposedWidth, proposedHeight);
-        setSize(nextSize);
-        setPosition((prev) => clampPosition(prev.x, prev.y, nextSize));
-      }
-    };
-    const onPointerUp = () => {
-      actionRef.current = null;
-    };
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-    };
-  }, [clampPosition, clampSize]);
-
-  useEffect(() => {
-    const onResize = () => {
-      setSize((prev) => {
-        const next = clampSize(prev.width, prev.height);
-        setPosition((current) => clampPosition(current.x, current.y, next));
-        return next;
-      });
-    };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [clampPosition, clampSize]);
-
-  return { position, size, beginDrag, beginResize };
-}
-
 export function PhysicsMicroscope({
   spinRPM,
   ballType,
@@ -272,6 +94,7 @@ export function PhysicsMicroscope({
   gravityY,
   mass,
 }: PhysicsMicroscopeProps) {
+  // Local UI state for the floating panel and its interactive overlays.
   const gradientsId = useId();
   const [rotationDeg, setRotationDeg] = useState(0);
   const [expanded, setExpanded] = useState(false);
@@ -284,6 +107,7 @@ export function PhysicsMicroscope({
   });
   const { position, size, beginDrag, beginResize } = useDraggableResizableWindow();
 
+  // Spin is rendered as a continuously rotating seam texture while the panel is open.
   useEffect(() => {
     if (Math.abs(spinRPM) < 0.01) return;
     let rafId = 0;
@@ -298,6 +122,7 @@ export function PhysicsMicroscope({
     return () => cancelAnimationFrame(rafId);
   }, [spinRPM]);
 
+  // Panel and SVG layout geometry derived from the current panel size.
   const panelHeight = expanded ? size.height : HEADER_HEIGHT + 2;
   const vizHeight = Math.max(140, panelHeight - HEADER_HEIGHT - DETAILS_HEIGHT);
   const detailsFontSizeRem = clamp(
@@ -324,15 +149,23 @@ export function PhysicsMicroscope({
     18,
     Math.min(svgWidth, vizHeight) * 0.26,
   );
+  // Normalize local air density against sea level so visual effects can scale
+  // between "no atmosphere" and "full atmosphere" without changing the physics model.
   const densityRatio = clamp(airDensity / AIR_DENSITY_SEA_LEVEL, 0, 1);
 
+  // Flow orientation is used both for streamline direction and vector display rotation.
   const flowVectorX = Math.abs(velocityX) < 0.01 && Math.abs(velocityY) < 0.01 ? 1 : velocityX;
   // Convert from physics Y-up vectors to SVG Y-down orientation.
   const flowVectorY = Math.abs(velocityX) < 0.01 && Math.abs(velocityY) < 0.01 ? 0 : -velocityY;
   const flowAngleDeg = (Math.atan2(flowVectorY, flowVectorX) * 180) / Math.PI;
   const streamlineAngleDeg = keepStreamlinesHorizontal ? 0 : flowAngleDeg;
+  const massNormalizationFactor = getMassNormalizationFactor(mass);
 
-const streamlines = useMemo(() => {
+  // Streamlines approximate how spin and forward motion reshape airflow around
+  // the ball. These curves are intentionally visual heuristics, not a CFD solver:
+  // they tighten on the suction side, spread on the pressure side, and add wake
+  // wobble so the microscope conveys why Magnus lift appears.
+  const streamlines = useMemo(() => {
   const lines: Array<{ id: string; main: string; wake: string; alpha: number }> = [];
   
   // Dynamically calculate lines based on panel height (max ~18 total, so 9 per side)
@@ -345,13 +178,10 @@ const streamlines = useMemo(() => {
   // backspin+: top, topspin-: bottom
   const withFlowSide = spinRPM >= 0 ? -1 : 1; 
 
-  // NEW: Add mass normalization for kinematic impact
-  const BASEBALL_MASS = 0.145;
-  const massFactor = BASEBALL_MASS / Math.max(mass, 0.001);
-
-  // Get the EFFECTIVE force (Force / Mass ratio)
+  // Use a mass-normalized Magnus proxy so lightweight balls show stronger
+  // visible bending when the same force has a larger kinematic effect.
   const actualMagnusForce = Math.hypot(magnusX, magnusY);
-  const effectiveMagnus = actualMagnusForce * massFactor;
+  const effectiveMagnus = actualMagnusForce * massNormalizationFactor;
 
   const spinStrength = clamp(effectiveMagnus * 0.35, 0, 1.4);
   const flowStrength = clamp(Math.hypot(velocityX, velocityY) / 38, 0, 1.5);
@@ -364,19 +194,19 @@ const streamlines = useMemo(() => {
   for (const side of [-1, 1]) {
     const isSuctionSide = (side === withFlowSide);
 
-    // 1. ANCHOR CLEARANCE: How closely the innermost line hugs the ball
+    // ANCHOR CLEARANCE: How closely the innermost line hugs the ball
     const baseClearance = 1.18;
     const suctionGap = Math.max(1.04, baseClearance - (spinStrength * 0.35));
     const pressureGap = baseClearance + (spinStrength * 0.50);
     const anchorClearance = ballRadius * (isSuctionSide ? suctionGap : pressureGap);
 
-    // 2. LAYER SPACING: The gap between stacked lines at the ball's center.
+    // LAYER SPACING: The gap between stacked lines at the ball's center.
     // Suction lines pack tightly together. Pressure lines spread far apart.
     const layerSpacing = isSuctionSide 
       ? Math.max(4, baseSpacing * (1 - spinStrength * 0.5)) 
       : baseSpacing * (1 + spinStrength * 0.9);
 
-    // 3. BEND WIDTH: How far out in front of the ball the lines start to curve.
+    // BEND WIDTH: How far out in front of the ball the lines start to curve.
     // Suction side dives sharply. Pressure side bulges gently.
     const bendWidth = isSuctionSide 
       ? ballRadius * (1.8 - spinStrength * 0.35) 
@@ -432,8 +262,8 @@ const streamlines = useMemo(() => {
         wakePoints[0] = { x: centerX, y: centerY + transitionY };
       }
 
-      // Calculate visual fade based on how far out the layer is
-      const absYNorm = layer / 8; // Assuming 8 layers max eventually
+      // Fade outer layers so the densest flow stays visually closest to the ball.
+      const absYNorm = layer / 8;
       const alpha = clamp((0.36 + (1 - absYNorm) * 0.6) * densityRatio, 0.1, 1);
       
       lines.push({
@@ -445,15 +275,11 @@ const streamlines = useMemo(() => {
     }
   }
   return lines;
-}, [ballRadius, centerX, centerY, densityRatio, spinRPM, velocityX, velocityY, svgWidth, vizHeight, magnusX, magnusY, mass]);
+  }, [ballRadius, centerX, centerY, densityRatio, spinRPM, velocityX, velocityY, svgWidth, vizHeight, magnusX, magnusY, massNormalizationFactor]);
 
-  // Adjust the scaling factors based on mass. 
-  // For a Ping Pong ball, this multiplier will be ~54x, 
-  // making the arrows much more prominent.
-  // Use actual projectile mass and normalize to baseball mass for standardization
-  const BASEBALL_MASS = 0.145;
-  const massFactor = BASEBALL_MASS / Math.max(mass, 0.001);
-  const visualScale = 38 * massFactor;
+  // Vector display state converts physical vectors into readable SVG arrows.
+  // These scales are deliberately non-literal so small forces remain visible.
+  const visualScale = 38 * massNormalizationFactor;
 
   const vectorMinLength = 7;
   const vectorMaxLength = Math.min(svgWidth, vizHeight) * 0.4;
@@ -479,21 +305,22 @@ const streamlines = useMemo(() => {
     gravity: { x: gravityX, y: gravityY },
   };
 
-  // Effective Forces drive graphics, not real forces (how the ball "feels" the air)
-  const effectiveDrag = Math.hypot(dragX, dragY) * massFactor;
-  const effectiveMagnus = Math.hypot(magnusX, magnusY) * massFactor;
+  // These mass-normalized values drive opacity only; they are visual proxies,
+  // not new forces being fed back into the simulation.
+  const effectiveDrag = Math.hypot(dragX, dragY) * massNormalizationFactor;
+  const effectiveMagnus = Math.hypot(magnusX, magnusY) * massNormalizationFactor;
 
-  //  Map effective forces to alpha (opacity). 
-  // A typical 3N force maps to 0.75 opacity. 0N force = 0 opacity.
+  // Map stronger visual proxies to higher opacity while keeping weak effects visible.
   const fadeResistance = 0.6;
   const dragAlpha = clamp(effectiveDrag / (effectiveDrag + fadeResistance), 0, 0.75);
   const magnusAlpha = clamp(effectiveMagnus / (effectiveMagnus + fadeResistance), 0, 0.75);
 
-  //  Determine sides using spinRPM (same safe logic as streamlines)
+  // Match the pressure highlights to the same suction/pressure side convention
+  // used by the streamline generator.
   const withFlowSide = spinRPM >= 0 ? -1 : 1;
   const againstFlowSide = -withFlowSide;
 
-  //  Apply the dynamic alphas
+  // Apply the computed opacity values to the layered pressure highlights.
   const pressureFrontRedAlpha = dragAlpha;
   const pressureWakeBlueAlpha = dragAlpha * 0.8; // Wake is naturally a bit fainter
   const pressureSpinRedAlpha = magnusAlpha;
@@ -506,6 +333,7 @@ const streamlines = useMemo(() => {
   const ballFill = ballType === "cannonball" ? "#6b7280" : ballType === "pingPong" ? "#fde68a" : "#f8fafc";
   const displayedRotationDeg = Math.abs(spinRPM) < 0.01 ? 0 : rotationDeg;
 
+  // Legend toggles control which vectors are overlaid on the microscope view.
   const toggleVector = (key: VectorKey) => {
     setVisibleVectors((prev) => ({ ...prev, [key]: !prev[key] }));
   };
@@ -611,6 +439,8 @@ const streamlines = useMemo(() => {
                 <stop offset="100%" stopColor="rgba(0,0,0,0)" />
               </radialGradient>
             </defs>
+            {/* Pressure-field highlights sit behind the streamlines and suggest
+                where air compresses, separates, and shifts under spin. */}
             <g transform={`rotate(${streamlineAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
               {/* WAKE: Left side (air exits here). Longer shape, low-pressure blue */}
               <ellipse cx={centerX - ballRadius * 1.6} cy={centerY} rx={ballRadius * 1.8} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
@@ -661,8 +491,8 @@ const streamlines = useMemo(() => {
               <path d={gravityArrow} stroke="#3b82f6" strokeWidth={2.3} fill="none" strokeLinecap="round" />
             )}
           </svg>
-          <div
-            style={{
+            <div
+              style={{
               height: DETAILS_HEIGHT,
               padding: "0.5rem 0.65rem 0.6rem",
               borderTop: "1px solid rgba(148,163,184,0.3)",
@@ -676,10 +506,12 @@ const streamlines = useMemo(() => {
               gap: "0.25rem 0.65rem",
               alignContent: "start",
             }}
-          >
-            <div style={{ gridColumn: "1 / span 2", fontWeight: 700, color: "#f8fafc", marginBottom: "0.15rem" }}>
-              Vector Legend (click to toggle)
-            </div>
+            >
+              {/* Each legend row reports raw vector components/magnitude and doubles
+                  as a visibility toggle for that vector overlay in the SVG. */}
+              <div style={{ gridColumn: "1 / span 2", fontWeight: 700, color: "#f8fafc", marginBottom: "0.15rem" }}>
+                Vector Legend (click to toggle)
+              </div>
             {VECTOR_META.map((meta) => {
               const xComp = vectorComponents[meta.key].x;
               const yComp = vectorComponents[meta.key].y;
