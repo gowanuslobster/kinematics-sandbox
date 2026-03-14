@@ -12,6 +12,7 @@ import {
 export type MicroscopeBallType = "baseball" | "pingPong" | "cannonball" | "custom";
 
 export interface PhysicsMicroscopeProps {
+  showMotionEffects?: boolean;
   spinRPM: number;
   ballType: MicroscopeBallType;
   airDensity: number;
@@ -29,9 +30,9 @@ export interface PhysicsMicroscopeProps {
 type VectorKey = "velocity" | "drag" | "magnus" | "gravity";
 
 const PANEL_DEFAULT_WIDTH = 550;
-const PANEL_DEFAULT_HEIGHT = 450;
+const PANEL_DEFAULT_HEIGHT = 490;
 const HEADER_HEIGHT = 38;
-const DETAILS_HEIGHT = 132;
+const DETAILS_HEIGHT = 162;
 
 const VECTOR_META: Array<{ key: VectorKey; label: string; unit: string; color: string }> = [
   { key: "velocity", label: "Velocity", unit: "m/s", color: "#22c55e" },
@@ -83,6 +84,7 @@ function SeamTexture({
  * state into an airflow, spin, and force "microscope" layered over the chart.
  */
 export function PhysicsMicroscope({
+  showMotionEffects = true,
   spinRPM,
   ballType,
   airDensity,
@@ -243,7 +245,10 @@ export function PhysicsMicroscope({
   ]);
 
   const ballFill = ballType === "cannonball" ? "#6b7280" : ballType === "pingPong" ? "#fde68a" : "#f8fafc";
-  const displayedRotationDeg = Math.abs(spinRPM) < 0.01 ? 0 : rotationDeg;
+  const displayedRotationDeg = showMotionEffects && Math.abs(spinRPM) >= 0.01 ? rotationDeg : 0;
+  const showSpinIndicator = Math.abs(spinRPM) >= 0.01;
+  const spinDirectionArrow = spinRPM >= 0 ? "↺" : "↻";
+  const spinDirectionLabel = spinRPM >= 0 ? "counterclockwise" : "clockwise";
 
   // Legend toggles control which vectors are overlaid on the microscope view.
   const toggleVector = (key: VectorKey) => {
@@ -290,10 +295,12 @@ export function PhysicsMicroscope({
       >
         <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", minWidth: 0 }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22d3ee", flexShrink: 0 }} />
-          <span style={{ color: "#f8fafc", fontWeight: 700, fontSize: "0.78rem", letterSpacing: "0.02em" }}>
-            Physics Dashboard
-          </span>
-          <span style={{ color: "#cbd5e1", fontSize: "0.68rem" }}>{describeBall(ballType)}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", minWidth: 0 }}>
+            <span style={{ color: "#f8fafc", fontWeight: 700, fontSize: "0.78rem", letterSpacing: "0.02em" }}>
+              Physics Dashboard
+            </span>
+            <span style={{ color: "#cbd5e1", fontSize: "0.68rem" }}>{describeBall(ballType)}</span>
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <label
@@ -355,37 +362,68 @@ export function PhysicsMicroscope({
                 <stop offset="100%" stopColor="rgba(0,0,0,0)" />
               </radialGradient>
             </defs>
+            {/* Spin readout stays inside the main visualization whenever the microscope is in motion-analysis mode. */}
+            {showSpinIndicator ? (
+              <g
+                aria-label={`Spin ${Math.abs(spinRPM).toFixed(0)} RPM ${spinDirectionLabel}`}
+              >
+                <rect
+                  x={12}
+                  y={12}
+                  rx={8}
+                  ry={8}
+                  width={118}
+                  height={26}
+                  fill="rgba(15,23,42,0.45)"
+                  stroke="rgba(191,219,254,0.28)"
+                />
+                <text
+                  x={22}
+                  y={30}
+                  fill="#bfdbfe"
+                  fontSize="14"
+                  fontWeight="700"
+                  fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+                >
+                  {spinDirectionArrow} {Math.abs(spinRPM).toFixed(0)} RPM
+                </text>
+              </g>
+            ) : null}
             {/* Pressure-field highlights sit behind the streamlines and suggest
                 where air compresses, separates, and shifts under spin. */}
             <g transform={`rotate(${streamlineAngleDeg.toFixed(2)} ${centerX} ${centerY})`}>
-              {/* WAKE: Left side (air exits here). Longer shape, low-pressure blue */}
-              <ellipse cx={centerX - ballRadius * 1.6} cy={centerY} rx={ballRadius * 1.8} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
-              
-              {/* FRONT: Right side (air crashes here). Tighter shape, high-pressure red */}
-              <ellipse cx={centerX + ballRadius * 1.3} cy={centerY} rx={ballRadius * 1.4} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />              
+              {showMotionEffects ? (
+                <>
+                  {/* WAKE: Left side (air exits here). Longer shape, low-pressure blue */}
+                  <ellipse cx={centerX - ballRadius * 1.6} cy={centerY} rx={ballRadius * 1.8} ry={ballRadius * 1.08} fill={`url(#${gradientsId}-wake-blue)`} />
 
-              {/* SPIN: Center lines (red for backspin, blue for topspin). Tighter shape, high-pressure */}
-              <ellipse cx={centerX - ballRadius * 0.24} cy={centerY + againstFlowSide * ballRadius * 0.72} rx={ballRadius * 1.14} ry={ballRadius * 0.88} fill={`url(#${gradientsId}-spin-red)`} />
-              <ellipse cx={centerX + ballRadius * 0.34} cy={centerY + withFlowSide * ballRadius * 0.72} rx={ballRadius * 1.2} ry={ballRadius * 0.92} fill={`url(#${gradientsId}-spin-blue)`} />
-              {streamlines.map((line) => (
-                <g key={line.id}>
-                  <path
-                    d={line.main}
-                    stroke={`rgba(186,230,253,${(0.9 * line.alpha).toFixed(3)})`}
-                    strokeWidth={1.55}
-                    fill="none"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d={line.wake}
-                    stroke={`rgba(186,230,253,${(0.5 * line.alpha).toFixed(3)})`}
-                    strokeWidth={1.45}
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeDasharray="7 6"
-                  />
-                </g>
-              ))}
+                  {/* FRONT: Right side (air crashes here). Tighter shape, high-pressure red */}
+                  <ellipse cx={centerX + ballRadius * 1.3} cy={centerY} rx={ballRadius * 1.4} ry={ballRadius * 0.96} fill={`url(#${gradientsId}-front-red)`} />
+
+                  {/* SPIN: Center lines (red for backspin, blue for topspin). Tighter shape, high-pressure */}
+                  <ellipse cx={centerX - ballRadius * 0.24} cy={centerY + againstFlowSide * ballRadius * 0.72} rx={ballRadius * 1.14} ry={ballRadius * 0.88} fill={`url(#${gradientsId}-spin-red)`} />
+                  <ellipse cx={centerX + ballRadius * 0.34} cy={centerY + withFlowSide * ballRadius * 0.72} rx={ballRadius * 1.2} ry={ballRadius * 0.92} fill={`url(#${gradientsId}-spin-blue)`} />
+                  {streamlines.map((line) => (
+                    <g key={line.id}>
+                      <path
+                        d={line.main}
+                        stroke={`rgba(186,230,253,${(0.9 * line.alpha).toFixed(3)})`}
+                        strokeWidth={1.55}
+                        fill="none"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d={line.wake}
+                        stroke={`rgba(186,230,253,${(0.5 * line.alpha).toFixed(3)})`}
+                        strokeWidth={1.45}
+                        fill="none"
+                        strokeLinecap="round"
+                        strokeDasharray="7 6"
+                      />
+                    </g>
+                  ))}
+                </>
+              ) : null}
             </g>
 
             {/* Ball body and seam texture stay centered while the seam rotates to show spin. */}
@@ -396,16 +434,16 @@ export function PhysicsMicroscope({
             <circle cx={centerX - ballRadius * 0.26} cy={centerY - ballRadius * 0.28} r={ballRadius * 0.2} fill="rgba(255,255,255,0.4)" />
 
             {/* Optional vector overlays show the currently enabled force/velocity arrows. */}
-            {visibleVectors.velocity && velocityArrow.length > 0 && (
+            {showMotionEffects && visibleVectors.velocity && velocityArrow.length > 0 && (
               <path d={velocityArrow} stroke="#22c55e" strokeWidth={2.3} fill="none" strokeLinecap="round" />
             )}
-            {visibleVectors.drag && dragArrow.length > 0 && (
+            {showMotionEffects && visibleVectors.drag && dragArrow.length > 0 && (
               <path d={dragArrow} stroke="#ef4444" strokeWidth={2.3} fill="none" strokeLinecap="round" />
             )}
-            {visibleVectors.magnus && magnusArrow.length > 0 && (
+            {showMotionEffects && visibleVectors.magnus && magnusArrow.length > 0 && (
               <path d={magnusArrow} stroke="#a855f7" strokeWidth={2.3} fill="none" strokeLinecap="round" />
             )}
-            {visibleVectors.gravity && gravityArrow.length > 0 && (
+            {showMotionEffects && visibleVectors.gravity && gravityArrow.length > 0 && (
               <path d={gravityArrow} stroke="#3b82f6" strokeWidth={2.3} fill="none" strokeLinecap="round" />
             )}
           </svg>
@@ -429,11 +467,49 @@ export function PhysicsMicroscope({
               {/* Each legend row reports raw vector components/magnitude and doubles
                   as a visibility toggle for that vector overlay in the SVG. */}
               <div style={{ gridColumn: "1 / span 2", fontWeight: 700, color: "#f8fafc", marginBottom: "0.15rem" }}>
-                Vector Legend (click to toggle)
+                Feature Legend (click vectors to toggle)
               </div>
-            {VECTOR_META.map((meta) => {
-              const xComp = vectorComponents[meta.key].x;
-              const yComp = vectorComponents[meta.key].y;
+              <div
+                style={{
+                  gridColumn: "1 / span 2",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.55rem",
+                  marginBottom: "0.2rem",
+                  color: "#cbd5e1",
+                  fontSize: `${Math.max(detailsFontSizeRem - 0.03, 0.68).toFixed(3)}rem`,
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem" }}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: "rgba(239,68,68,0.8)",
+                      boxShadow: "0 0 10px rgba(239,68,68,0.55)",
+                      flexShrink: 0,
+                    }}
+                  />
+                  Red glow = higher pressure
+                </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem" }}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: "rgba(59,130,246,0.8)",
+                      boxShadow: "0 0 10px rgba(59,130,246,0.55)",
+                      flexShrink: 0,
+                    }}
+                  />
+                  Blue glow = lower pressure
+                </span>
+              </div>
+              {VECTOR_META.map((meta) => {
+                const xComp = vectorComponents[meta.key].x;
+                const yComp = vectorComponents[meta.key].y;
               const magnitude = Math.hypot(xComp, yComp);
               return (
                 <button

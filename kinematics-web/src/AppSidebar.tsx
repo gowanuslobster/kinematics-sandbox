@@ -11,6 +11,8 @@ type Mode = "live" | "challenge";
 interface AppSidebarProps {
   mode: Mode;
   isAnimating: boolean;
+  isPlaybackPaused: boolean;
+  challengeShotActive: boolean;
   pinnedTrajectoryActive: boolean;
   values: SimulationControlValues;
   derived: {
@@ -22,6 +24,7 @@ interface AppSidebarProps {
   };
   actions: SimulationControlActions;
   onFire: () => void;
+  onTogglePlaybackPaused: () => void;
   onPinCurrentTrajectory: () => void;
   onClearPinnedTrajectory: () => void;
 }
@@ -295,15 +298,28 @@ function PairedInputControl({
 export function AppSidebar({
   mode,
   isAnimating,
+  isPlaybackPaused,
+  challengeShotActive,
   pinnedTrajectoryActive,
   values,
   derived,
   actions,
   onFire,
+  onTogglePlaybackPaused,
   onPinCurrentTrajectory,
   onClearPinnedTrajectory,
 }: AppSidebarProps) {
   const isChallenge = mode === "challenge";
+  // The challenge action button becomes a small playback transport control
+  // once a shot exists and has not yet finished revealing.
+  const challengeButtonLabel =
+    isAnimating ? "Pause" : isPlaybackPaused ? "Resume" : "Fire!";
+  const challengeButtonHandler =
+    challengeShotActive && (isAnimating || isPlaybackPaused)
+      ? onTogglePlaybackPaused
+      : onFire;
+  const challengeButtonBackground =
+    isAnimating ? "#d97706" : isPlaybackPaused ? "#2563eb" : "#dc2626";
 
   return (
     <aside
@@ -323,20 +339,19 @@ export function AppSidebar({
         <SidebarSection>
           <button
             type="button"
-            onClick={onFire}
-            disabled={isAnimating}
+            onClick={challengeButtonHandler}
             style={{
               padding: "0.5rem 1rem",
               fontSize: "1rem",
               fontWeight: 600,
-              background: isAnimating ? "#9ca3af" : "#dc2626",
+              background: challengeButtonBackground,
               color: "#fff",
               border: "none",
               borderRadius: 8,
-              cursor: isAnimating ? "not-allowed" : "pointer",
+              cursor: "pointer",
             }}
           >
-            {isAnimating ? "Firing…" : "Fire!"}
+            {challengeButtonLabel}
           </button>
         </SidebarSection>
       ) : (

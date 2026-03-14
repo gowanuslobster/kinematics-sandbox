@@ -8,6 +8,7 @@ interface ChallengeShot {
   points: TrajectoryPoint[];
   hit: boolean;
   visibleCount: number;
+  contextKey: string;
 }
 
 const ANIMATION_INTERVAL_MS = 16;
@@ -20,12 +21,15 @@ const STATIC_IDLE_MS = 300;
  * Encapsulates challenge-mode playback.
  * It owns the animated reveal of a fired shot, keeps track of the current
  * analysis point, and exposes the mode-dependent points/hit state that the UI
- * should render.
+ * should render. Playback speed affects reveal cadence only; it does not
+ * change the underlying simulated trajectory.
  */
 export function useChallengePlayback(
   mode: Mode,
   points: TrajectoryPoint[],
   hit: boolean,
+  playbackSpeed = 1,
+  trajectoryContextKey: string,
 ) {
   // Track recent user activity so a static tail of points can fast-forward
   // instead of animating frame-by-frame when the user is idle.
@@ -35,17 +39,29 @@ export function useChallengePlayback(
   const [activeAnalysisPoint, setActiveAnalysisPoint] = useState<TrajectoryPoint | null>(null);
   const [analysisSource, setAnalysisSource] = useState<AnalysisSource>("none");
   const [isAutoScrubbing, setIsAutoScrubbing] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const challengeShotRef = useRef<ChallengeShot | null>(null);
+  const effectiveChallengeShot =
+    challengeShot != null && challengeShot.contextKey === trajectoryContextKey
+      ? challengeShot
+      : null;
 
   const isChallenge = mode === "challenge";
+  // A paused shot is still "active", but autoplay no longer owns the timeline.
   const isAnimating =
     isChallenge
-    && challengeShot != null
-    && challengeShot.visibleCount < challengeShot.points.length;
+    && effectiveChallengeShot != null
+    && !isPaused
+    && effectiveChallengeShot.visibleCount < effectiveChallengeShot.points.length;
+  const isPausedDuringPlayback =
+    isChallenge
+    && effectiveChallengeShot != null
+    && isPaused
+    && effectiveChallengeShot.visibleCount < effectiveChallengeShot.points.length;
   const challengeComplete =
     isChallenge
-    && challengeShot != null
-    && challengeShot.visibleCount >= challengeShot.points.length;
+    && effectiveChallengeShot != null
+    && effectiveChallengeShot.visibleCount >= effectiveChallengeShot.points.length;
 
   useEffect(() => {
     challengeShotRef.current = challengeShot;
@@ -71,7 +87,11 @@ export function useChallengePlayback(
   }, []);
 
   useEffect(() => {
-    if (!challengeShot || challengeShot.visibleCount >= challengeShot.points.length) return;
+    if (
+      !effectiveChallengeShot
+      || isPaused
+      || effectiveChallengeShot.visibleCount >= effectiveChallengeShot.points.length
+    ) return;
 
     let lastFrameTime: number | null = null;
     let frameId = 0;
@@ -96,7 +116,7 @@ export function useChallengePlayback(
 
       lastFrameTime = timestamp;
       let nextVisibleCount = Math.min(
-        currentShot.visibleCount + ANIMATION_POINTS_PER_FRAME,
+        currentShot.visibleCount + Math.max(1, Math.round(ANIMATION_POINTS_PER_FRAME * playbackSpeed)),
         currentShot.points.length,
       );
 
@@ -139,20 +159,26 @@ export function useChallengePlayback(
 
     frameId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameId);
-  }, [challengeShot]);
+  }, [effectiveChallengeShot, isPaused, playbackSpeed]);
 
+  // Live mode always shows the full current path, while challenge mode reveals
+  // only the points the playback loop has exposed so far.
   const visiblePoints = useMemo(() => {
     if (mode === "live") return points;
-    if (!challengeShot) return [];
-    return challengeShot.points.slice(0, challengeShot.visibleCount);
-  }, [mode, challengeShot, points]);
+    if (!effectiveChallengeShot) return [];
+    return effectiveChallengeShot.points.slice(0, effectiveChallengeShot.visibleCount);
+  }, [effectiveChallengeShot, mode, points]);
 
   const displayHit =
     mode === "live"
       ? hit
-      : challengeComplete && challengeShot
-        ? challengeShot.hit
+      : challengeComplete && effectiveChallengeShot
+        ? effectiveChallengeShot.hit
         : false;
+  const displayedAnalysisSource =
+    mode === "challenge" && effectiveChallengeShot == null ? "none" : analysisSource;
+  const displayedActiveAnalysisPoint =
+    mode === "challenge" && effectiveChallengeShot == null ? null : activeAnalysisPoint;
 
   // Ignore hover input while the auto-scrub animation is in control. Once the
   // user deliberately hovers, ownership of the analysis point becomes manual.
@@ -182,18 +208,31 @@ export function useChallengePlayback(
       points: [...points],
       hit,
       visibleCount: 0,
+      contextKey: trajectoryContextKey,
     };
     setAnalysisSource("auto");
     setIsAutoScrubbing(true);
+    setIsPaused(false);
     setActiveAnalysisPoint(shot.points[0] ?? null);
     challengeShotRef.current = shot;
     setChallengeShot(shot);
-  }, [hit, mode, points]);
+  }, [hit, mode, points, trajectoryContextKey]);
+
+  // Pausing freezes playback at the current visible point; resuming restarts the reveal loop.
+  const togglePlaybackPaused = useCallback(() => {
+    if (
+      mode !== "challenge"
+      || !effectiveChallengeShot
+      || effectiveChallengeShot.visibleCount >= effectiveChallengeShot.points.length
+    ) return;
+    setIsPaused((current) => !current);
+  }, [effectiveChallengeShot, mode]);
 
   // Returning to live mode should fully discard any challenge playback state.
   const resetForLiveMode = useCallback(() => {
     staticFrameStreakRef.current = 0;
     setIsAutoScrubbing(false);
+    setIsPaused(false);
     setAnalysisSource("none");
     setActiveAnalysisPoint(null);
     challengeShotRef.current = null;
@@ -203,19 +242,22 @@ export function useChallengePlayback(
   // Entering challenge mode keeps the current controls/trajectory but clears
   // stale analysis state from prior hovering or playback.
   const resetForChallengeMode = useCallback(() => {
+    setIsPaused(false);
     setAnalysisSource("none");
     setActiveAnalysisPoint(null);
   }, []);
 
   return {
-    activeAnalysisPoint,
-    analysisSource,
+    activeAnalysisPoint: displayedActiveAnalysisPoint,
+    analysisSource: displayedAnalysisSource,
     challengeComplete,
-    challengeShot,
+    challengeShot: effectiveChallengeShot,
     displayHit,
     isAnimating,
+    isPaused: isPausedDuringPlayback,
     visiblePoints,
     fire,
+    togglePlaybackPaused,
     handleManualAnalysisPointChange,
     resetForChallengeMode,
     resetForLiveMode,
