@@ -8,6 +8,10 @@ import { useSimulationControls } from "./useSimulationControls";
 
 type Mode = "live" | "challenge";
 
+/**
+ * Converts a miss into a simple coaching hint by comparing the trajectory's
+ * landing point and nearest approach against the target location.
+ */
 function getHitHint(
   hit: boolean,
   points: TrajectoryPoint[],
@@ -40,6 +44,7 @@ function getHitHint(
   return "Too high — trajectory passes above the target. Try decreasing launch angle.";
 }
 
+/** Small shared button for the live/challenge mode toggle strip. */
 function ModeButton({
   active,
   label,
@@ -69,14 +74,23 @@ function ModeButton({
   );
 }
 
+/**
+ * Top-level app orchestration component.
+ * Owns the current mode and pinned trajectory, derives the active simulation
+ * result from control state, and composes the sidebar, chart, microscope, and
+ * challenge playback behavior into a single screen.
+ */
 function App() {
+  // UI-only state that does not belong to simulation input or playback hooks.
   const [mode, setMode] = useState<Mode>("live");
   const [pinnedTrajectory, setPinnedTrajectory] = useState<{
     points: TrajectoryPoint[];
   } | null>(null);
 
+  // User-adjustable simulation controls and the small derived values they expose.
   const { values, derived, actions } = useSimulationControls();
 
+  // Build the physics engine input from the current sidebar control state.
   const simulationParams = useMemo(() => ({
     initialVelocity: values.initialVelocity,
     launchAngleDeg: values.launchAngle,
@@ -103,6 +117,7 @@ function App() {
     values.targetY,
   ]);
 
+  // Run the current simulation and unpack the metrics used across the UI.
   const simulationResult = useMemo(() => calculateTrajectory(simulationParams), [simulationParams]);
   const {
     points,
@@ -116,6 +131,7 @@ function App() {
     rangeActual,
   } = simulationResult;
 
+  // Challenge playback derives visible points and analysis state from the latest trajectory.
   const {
     activeAnalysisPoint,
     challengeComplete,
@@ -129,6 +145,7 @@ function App() {
     resetForLiveMode,
   } = useChallengePlayback(mode, points, hit);
 
+  // Default launch vector shown before the user scrubs onto a specific trajectory point.
   const launchAngleRad = (values.launchAngle * Math.PI) / 180;
   const defaultVelocityX = Math.max(values.initialVelocity, 0) * Math.cos(launchAngleRad);
   const defaultVelocityY = Math.max(values.initialVelocity, 0) * Math.sin(launchAngleRad);
@@ -138,19 +155,23 @@ function App() {
     [hit, points, values.targetX, values.targetY],
   );
 
+  // Snapshot the current live trajectory so it can stay visible while controls change.
   const handlePinCurrentTrajectory = () => {
     setPinnedTrajectory({ points: [...points] });
   };
 
+  // Remove the saved live-trajectory overlay from the chart.
   const handleClearPinnedTrajectory = () => {
     setPinnedTrajectory(null);
   };
 
+  // Switching back to live mode clears any in-progress challenge playback state.
   const enterLiveMode = () => {
     setMode("live");
     resetForLiveMode();
   };
 
+  // Challenge mode keeps the latest controls but resets hover/analysis state.
   const enterChallengeMode = () => {
     setMode("challenge");
     resetForChallengeMode();
@@ -166,6 +187,7 @@ function App() {
         overflow: "hidden",
       }}
     >
+      {/* Top bar for switching between the always-live simulation and challenge playback. */}
       <div
         style={{
           flexShrink: 0,
@@ -183,6 +205,7 @@ function App() {
         <ModeButton active={mode === "challenge"} label="Challenge Mode" onClick={enterChallengeMode} />
       </div>
 
+      {/* Main application split: controls on the left, visualization and status on the right. */}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <AppSidebar
           mode={mode}
@@ -207,6 +230,7 @@ function App() {
             flexDirection: "column",
           }}
         >
+          {/* Primary visualization area combining the chart and force/velocity microscope. */}
           <div
             style={{
               flex: 3,
@@ -246,6 +270,7 @@ function App() {
             />
           </div>
 
+          {/* Mode-specific feedback and summary metrics below the main visualization. */}
           <div
             style={{
               flex: 1,
