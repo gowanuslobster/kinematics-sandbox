@@ -7,6 +7,16 @@ import { useChallengePlayback } from "./useChallengePlayback";
 import { useSimulationControls } from "./useSimulationControls";
 
 type Mode = "live" | "challenge";
+/** Couples a sticky clicked-point selection to the trajectory context that created it. */
+type ContextualAnalysisPoint = {
+  point: TrajectoryPoint;
+  contextKey: string;
+};
+/** Couples a sticky trajectory-progress selection to the trajectory context that created it. */
+type ContextualTrajectoryProgress = {
+  progress: number;
+  contextKey: string;
+};
 
 /**
  * Converts a miss into a simple coaching hint by comparing the trajectory's
@@ -83,7 +93,9 @@ function ModeButton({
 function App() {
   // UI-only state that does not belong to simulation input or playback hooks.
   const [mode, setMode] = useState<Mode>("live");
-  const [selectedAnalysisPoint, setSelectedAnalysisPoint] = useState<TrajectoryPoint | null>(null);
+  const [selectedAnalysisPoint, setSelectedAnalysisPoint] = useState<ContextualAnalysisPoint | null>(null);
+  const [selectedTrajectoryProgress, setSelectedTrajectoryProgress] = useState<ContextualTrajectoryProgress | null>(null);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [pinnedTrajectory, setPinnedTrajectory] = useState<{
     points: TrajectoryPoint[];
   } | null>(null);
@@ -132,6 +144,11 @@ function App() {
     rangeActual,
   } = simulationResult;
 
+  const analysisContextKey = useMemo(
+    () => JSON.stringify({ mode, simulationParams }),
+    [mode, simulationParams],
+  );
+
   // Challenge playback derives visible points and analysis state from the latest trajectory.
   const {
     activeAnalysisPoint,
@@ -140,28 +157,74 @@ function App() {
     challengeShot,
     displayHit,
     isAnimating,
+    isPaused,
     visiblePoints,
     fire,
+    togglePlaybackPaused,
     handleManualAnalysisPointChange,
     resetForChallengeMode,
     resetForLiveMode,
-  } = useChallengePlayback(mode, points, hit);
+  } = useChallengePlayback(mode, points, hit, playbackSpeed, analysisContextKey);
 
   // Default launch vector shown before the user scrubs onto a specific trajectory point.
   const launchAngleRad = (values.launchAngle * Math.PI) / 180;
   const defaultVelocityX = Math.max(values.initialVelocity, 0) * Math.cos(launchAngleRad);
   const defaultVelocityY = Math.max(values.initialVelocity, 0) * Math.sin(launchAngleRad);
+  // Sticky selections are only valid while they still belong to the current
+  // simulation context and visible trajectory.
   const validSelectedAnalysisPoint =
-    selectedAnalysisPoint != null && points.includes(selectedAnalysisPoint)
-      ? selectedAnalysisPoint
+    selectedAnalysisPoint != null
+    && selectedAnalysisPoint.contextKey === analysisContextKey
+    && visiblePoints.includes(selectedAnalysisPoint.point)
+      ? selectedAnalysisPoint.point
       : null;
-  const combinedActiveAnalysisPoint = validSelectedAnalysisPoint ?? activeAnalysisPoint;
+  const validSelectedTrajectoryProgress =
+    selectedTrajectoryProgress != null && selectedTrajectoryProgress.contextKey === analysisContextKey
+      ? selectedTrajectoryProgress.progress
+      : null;
+  // Convert the selected percentage into a concrete sampled point on the
+  // currently visible trajectory.
+  const progressSelectedPoint = useMemo(() => {
+    if (validSelectedTrajectoryProgress == null || visiblePoints.length === 0) return null;
+    if (visiblePoints.length === 1) return visiblePoints[0];
+    const clampedProgress = Math.min(100, Math.max(0, validSelectedTrajectoryProgress));
+    const pointIndex = Math.round((clampedProgress / 100) * (visiblePoints.length - 1));
+    return visiblePoints[pointIndex] ?? null;
+  }, [validSelectedTrajectoryProgress, visiblePoints]);
+  const playbackOwnsTrajectoryProgress =
+    mode === "challenge" && challengeShot != null && !challengeComplete;
+  // While a challenge shot is still in progress, the disabled slider mirrors
+  // that shot's reveal percentage even if playback is paused mid-flight.
+  const displayedTrajectoryProgress = useMemo(() => {
+    if (
+      playbackOwnsTrajectoryProgress
+      && challengeShot != null
+      && challengeShot.points.length > 1
+    ) {
+      const completedPoints = Math.max(0, challengeShot.visibleCount - 1);
+      return (completedPoints / (challengeShot.points.length - 1)) * 100;
+    }
+    return validSelectedTrajectoryProgress;
+  }, [challengeShot, playbackOwnsTrajectoryProgress, validSelectedTrajectoryProgress]);
+  // Incomplete challenge playback owns the analysis point whether the shot is
+  // moving or paused. Otherwise trajectory progress outranks clicked-point and hover state.
+  const combinedActiveAnalysisPoint =
+    isAnimating || isPaused
+      ? activeAnalysisPoint
+      : progressSelectedPoint ?? validSelectedAnalysisPoint ?? activeAnalysisPoint;
   const chartSelectionEnabled =
-    mode === "live" || (mode === "challenge" && challengeShot != null && !isAnimating);
+    mode === "live" || (mode === "challenge" && challengeShot != null && !isAnimating && !isPaused);
+  const trajectoryProgressEnabled =
+    visiblePoints.length > 0
+    && (mode === "live" || (mode === "challenge" && challengeShot != null && !isAnimating && !isPaused));
 
-  // Only show motion effects when the trajectory is animating or user is manually analyzing a point.
+  // Motion effects stay visible while autoplay, trajectory progress, or manual analysis owns the point.
   const microscopeShouldShowMotionEffects =
-    isAnimating || analysisSource === "manual" || validSelectedAnalysisPoint != null;
+    isAnimating
+    || isPaused
+    || analysisSource === "manual"
+    || validSelectedAnalysisPoint != null
+    || progressSelectedPoint != null;
 
   const hitHint = useMemo(
     () => getHitHint(hit, points, values.targetX, values.targetY),
@@ -181,6 +244,7 @@ function App() {
   // Switching back to live mode clears any in-progress challenge playback state.
   const enterLiveMode = () => {
     setSelectedAnalysisPoint(null);
+    setSelectedTrajectoryProgress(null);
     setMode("live");
     resetForLiveMode();
   };
@@ -188,12 +252,14 @@ function App() {
   // Challenge mode keeps the latest controls but resets hover/analysis state.
   const enterChallengeMode = () => {
     setSelectedAnalysisPoint(null);
+    setSelectedTrajectoryProgress(null);
     setMode("challenge");
     resetForChallengeMode();
   };
 
   const handleFire = () => {
     setSelectedAnalysisPoint(null);
+    setSelectedTrajectoryProgress(null);
     fire();
   };
 
@@ -230,11 +296,14 @@ function App() {
         <AppSidebar
           mode={mode}
           isAnimating={isAnimating}
+          isPlaybackPaused={isPaused}
+          challengeShotActive={challengeShot != null}
           pinnedTrajectoryActive={pinnedTrajectory != null}
           values={values}
           derived={derived}
           actions={actions}
           onFire={handleFire}
+          onTogglePlaybackPaused={togglePlaybackPaused}
           onPinCurrentTrajectory={handlePinCurrentTrajectory}
           onClearPinnedTrajectory={handleClearPinnedTrajectory}
         />
@@ -271,11 +340,27 @@ function App() {
               hit={displayHit}
               pinnedPath={mode === "live" ? (pinnedTrajectory?.points ?? undefined) : undefined}
               vacuumPath={mode === "live" ? (vacuumPath ?? undefined) : undefined}
-              activeAnalysisPoint={activeAnalysisPoint}
+              activeAnalysisPoint={combinedActiveAnalysisPoint}
               selectedAnalysisPoint={validSelectedAnalysisPoint}
               onHoverPointChange={handleManualAnalysisPointChange}
-              onSelectedPointChange={setSelectedAnalysisPoint}
+              onSelectedPointChange={(point) => {
+                setSelectedTrajectoryProgress(null);
+                setSelectedAnalysisPoint(
+                  point == null ? null : { point, contextKey: analysisContextKey },
+                );
+              }}
               selectionEnabled={chartSelectionEnabled}
+              trajectoryProgress={displayedTrajectoryProgress}
+              onTrajectoryProgressChange={(progress) => {
+                setSelectedAnalysisPoint(null);
+                setSelectedTrajectoryProgress(
+                  progress == null ? null : { progress, contextKey: analysisContextKey },
+                );
+              }}
+              trajectoryProgressEnabled={trajectoryProgressEnabled}
+              showPlaybackSpeedControl={mode === "challenge"}
+              playbackSpeed={playbackSpeed}
+              onPlaybackSpeedChange={setPlaybackSpeed}
             />
             <PhysicsMicroscope
               showMotionEffects={microscopeShouldShowMotionEffects}
@@ -363,6 +448,9 @@ function App() {
             ) : null}
             {mode === "challenge" && isAnimating ? (
               <div style={{ color: "#6b7280", fontSize: "0.875rem" }}>Firing…</div>
+            ) : null}
+            {mode === "challenge" && isPaused ? (
+              <div style={{ color: "#6b7280", fontSize: "0.875rem" }}>Paused</div>
             ) : null}
             {mode === "challenge" && challengeComplete && challengeShot ? (
               <div

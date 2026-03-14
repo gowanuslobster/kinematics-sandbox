@@ -28,6 +28,12 @@ export interface TrajectoryChartProps {
   onHoverPointChange?: (point: TrajectoryPoint | null) => void;
   onSelectedPointChange?: (point: TrajectoryPoint | null) => void;
   selectionEnabled?: boolean;
+  trajectoryProgress?: number | null;
+  onTrajectoryProgressChange?: (progress: number | null) => void;
+  trajectoryProgressEnabled?: boolean;
+  showPlaybackSpeedControl?: boolean;
+  playbackSpeed?: number;
+  onPlaybackSpeedChange?: (speed: number) => void;
 }
 
 interface PlotShape {
@@ -314,6 +320,14 @@ function findClosestHoverIndex({
   return null;
 }
 
+/** Converts a trajectory point reference into a percent-complete position along the path. */
+function getTrajectoryProgressForPoint(point: TrajectoryPoint | null | undefined, points: TrajectoryPoint[]) {
+  if (!point || points.length <= 1) return 0;
+  const pointIndex = points.indexOf(point);
+  if (pointIndex < 0) return 0;
+  return (pointIndex / (points.length - 1)) * 100;
+}
+
 /** Plotly wrapper that renders the current trajectory and analysis overlays. */
 export function TrajectoryChart({
   points,
@@ -331,6 +345,12 @@ export function TrajectoryChart({
   onHoverPointChange,
   onSelectedPointChange,
   selectionEnabled = false,
+  trajectoryProgress,
+  onTrajectoryProgressChange,
+  trajectoryProgressEnabled = false,
+  showPlaybackSpeedControl = false,
+  playbackSpeed = 1,
+  onPlaybackSpeedChange,
 }: TrajectoryChartProps) {
   const plotContainerRef = useRef<HTMLDivElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -339,6 +359,12 @@ export function TrajectoryChart({
       ? points[hoverIndex]
       : null;
   const analysisPoint = selectedAnalysisPoint ?? activeAnalysisPoint ?? manualHoveredPoint;
+  // The slider shows explicit trajectory progress when present; otherwise it
+  // falls back to whichever point is currently driving the overlays.
+  const displayedTrajectoryProgress = useMemo(() => {
+    if (trajectoryProgress != null) return trajectoryProgress;
+    return getTrajectoryProgressForPoint(selectedAnalysisPoint ?? activeAnalysisPoint, points);
+  }, [activeAnalysisPoint, points, selectedAnalysisPoint, trajectoryProgress]);
 
   // Forward hover ownership to the parent so challenge playback can decide
   // whether the chart or the autoplay animation controls the analysis point.
@@ -442,44 +468,118 @@ export function TrajectoryChart({
   };
 
   return (
-    // Plotly renders the chart while a transparent overlay captures custom hover behavior.
-    <div
-      ref={plotContainerRef}
-      style={{ position: "relative", flex: 1, minHeight: 0, width: "100%", display: "flex" }}
-    >
-      <Plot
-        data={data}
-        layout={{
-          margin: PLOT_MARGIN,
-          xaxis: {
-            title: "Distance",
-            showgrid: true,
-            range: xRange,
-          },
-          yaxis: {
-            title: "Height",
-            showgrid: true,
-            range: yRange,
-          },
-          showlegend: pinnedPath != null || vacuumPath != null,
-          legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.8)" },
-          hovermode: "closest",
-          shapes,
-        }}
-        config={{ responsive: true }}
-        style={{ width: "100%", height: "100%", minHeight: 400 }}
-      />
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, width: "100%" }}>
+      {/* Plotly renders the chart while a transparent overlay captures custom hover behavior. */}
       <div
-        onMouseMove={handlePlotMouseMove}
-        onMouseLeave={() => setHoverIndex(null)}
-        onClick={handlePlotClick}
-        style={{
-          position: "absolute",
-          inset: 0,
-          zIndex: 4,
-          background: "transparent",
-        }}
-      />
+        ref={plotContainerRef}
+        style={{ position: "relative", flex: 1, minHeight: 0, width: "100%", display: "flex" }}
+      >
+        <Plot
+          data={data}
+          layout={{
+            margin: PLOT_MARGIN,
+            xaxis: {
+              title: "Distance",
+              showgrid: true,
+              range: xRange,
+            },
+            yaxis: {
+              title: "Height",
+              showgrid: true,
+              range: yRange,
+            },
+            showlegend: pinnedPath != null || vacuumPath != null,
+            legend: { x: 0.02, y: 0.98, bgcolor: "rgba(255,255,255,0.8)" },
+            hovermode: "closest",
+            shapes,
+          }}
+          config={{ responsive: true }}
+          style={{ width: "100%", height: "100%", minHeight: 400 }}
+        />
+        <div
+          onMouseMove={handlePlotMouseMove}
+          onMouseLeave={() => setHoverIndex(null)}
+          onClick={handlePlotClick}
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 4,
+            background: "transparent",
+          }}
+        />
+      </div>
+
+      {(points.length > 0 || showPlaybackSpeedControl) ? (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "0.75rem 1rem",
+            padding: "0.5rem 0.75rem 0.25rem",
+            borderTop: "1px solid #e5e7eb",
+            background: "#f9fafb",
+            fontSize: "0.8125rem",
+          }}
+        >
+          {points.length > 0 ? (
+            <>
+              {/* Timeline controls let the user lock the chart and microscope onto one percentage of the path. */}
+              <label
+                htmlFor="trajectory-progress"
+                style={{ fontWeight: 600, color: "#374151", minWidth: 122 }}
+              >
+                Trajectory progress
+              </label>
+              <input
+                id="trajectory-progress"
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={Math.round(displayedTrajectoryProgress)}
+                disabled={!trajectoryProgressEnabled}
+                onChange={(event) => {
+                  onTrajectoryProgressChange?.(Number(event.target.value));
+                }}
+                style={{ flex: 1, minWidth: 180 }}
+              />
+              <span style={{ minWidth: 44, color: "#4b5563", textAlign: "right" }}>
+                {Math.round(displayedTrajectoryProgress)}%
+              </span>
+            </>
+          ) : null}
+          {showPlaybackSpeedControl ? (
+            <>
+              {/* Challenge mode can speed up or slow down the reveal loop without changing the trajectory itself. */}
+              <label
+                htmlFor="animation-speed"
+                style={{ fontWeight: 600, color: "#374151" }}
+              >
+                Animation speed
+              </label>
+              <select
+                id="animation-speed"
+                value={String(playbackSpeed)}
+                onChange={(event) => onPlaybackSpeedChange?.(Number(event.target.value))}
+                style={{
+                  border: "1px solid #cbd5e1",
+                  borderRadius: 6,
+                  padding: "0.25rem 0.5rem",
+                  background: "#fff",
+                  color: "#111827",
+                }}
+              >
+                <option value="0.5">0.5x</option>
+                <option value="1">1x</option>
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+                <option value="8">8x</option>
+              </select>
+            </>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
