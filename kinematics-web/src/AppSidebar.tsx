@@ -110,6 +110,16 @@ const buttonGroupButtonStyle = {
   cursor: "pointer",
 };
 
+const CENTIMETERS_PER_METER = 100;
+
+function metersToCentimeters(valueInMeters: number): number {
+  return Number((valueInMeters * CENTIMETERS_PER_METER).toFixed(1));
+}
+
+function centimetersToMeters(valueInCentimeters: number): number {
+  return valueInCentimeters / CENTIMETERS_PER_METER;
+}
+
 /** Lightweight wrapper for sections that group one or more sidebar elements. */
 function SidebarSection({ children }: { children: ReactNode }) {
   return <div style={elementBaseStyle}>{children}</div>;
@@ -458,12 +468,12 @@ export function AppSidebar({
       />
 
       <InputControl
-        label="Radius (m)"
-        value={values.radius}
-        min={0.001}
+        label="Radius (cm)"
+        value={metersToCentimeters(values.radius)}
+        min={0.1}
         step="any"
-        ariaLabel="Ball radius"
-        onChange={actions.setRadius}
+        ariaLabel="Ball radius in centimeters"
+        onChange={(nextValue) => actions.setRadius(centimetersToMeters(nextValue))}
       />
 
       <SliderControl
