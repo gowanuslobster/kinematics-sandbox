@@ -51,6 +51,11 @@ export interface SimulationControlActions {
   setYAxisMax: (value: number) => void;
 }
 
+/**
+ * Centralizes the sidebar's simulation-control state.
+ * Returns grouped values, derived display data, and actions so the top-level
+ * app can stay focused on orchestration instead of individual setter logic.
+ */
 export function useSimulationControls(): {
   values: SimulationControlValues;
   derived: {
@@ -78,6 +83,8 @@ export function useSimulationControls(): {
   const [xAxisMax, setXAxisMax] = useState(120);
   const [yAxisMax, setYAxisMax] = useState(70);
 
+  // These actions keep related control updates together, including rules that
+  // switch the selected ball to "custom" after manual edits.
   const actions: SimulationControlActions = {
     setInitialVelocity,
     updateVelocityMax(value) {
@@ -129,6 +136,7 @@ export function useSimulationControls(): {
     setYAxisMax,
   };
 
+  // Raw values mirror the current sidebar control state one-to-one.
   const values: SimulationControlValues = {
     initialVelocity,
     velocityMax,
@@ -149,6 +157,7 @@ export function useSimulationControls(): {
     yAxisMax,
   };
 
+  // Derived values keep formatting/display concerns out of App.tsx.
   const derived = useMemo(() => ({
     targetRadius: targetDiameter / 2,
     selectedBallLabel: BALL_LABELS[selectedBallType],

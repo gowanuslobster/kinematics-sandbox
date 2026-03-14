@@ -16,11 +16,19 @@ const STATIC_POINT_DELTA_EPSILON = 1e-4;
 const STATIC_FRAME_STREAK_TO_PAUSE = 6;
 const STATIC_IDLE_MS = 300;
 
+/**
+ * Encapsulates challenge-mode playback.
+ * It owns the animated reveal of a fired shot, keeps track of the current
+ * analysis point, and exposes the mode-dependent points/hit state that the UI
+ * should render.
+ */
 export function useChallengePlayback(
   mode: Mode,
   points: TrajectoryPoint[],
   hit: boolean,
 ) {
+  // Track recent user activity so a static tail of points can fast-forward
+  // instead of animating frame-by-frame when the user is idle.
   const lastInteractionAtRef = useRef<number>(0);
   const staticFrameStreakRef = useRef<number>(0);
   const [challengeShot, setChallengeShot] = useState<ChallengeShot | null>(null);
@@ -44,6 +52,7 @@ export function useChallengePlayback(
   }, [challengeShot]);
 
   useEffect(() => {
+    // Any user interaction resets the idle detector used by the playback loop.
     const markInteraction = () => {
       lastInteractionAtRef.current = Date.now();
       staticFrameStreakRef.current = 0;
@@ -67,6 +76,8 @@ export function useChallengePlayback(
     let lastFrameTime: number | null = null;
     let frameId = 0;
 
+    // Advance the visible point count on a fixed cadence while optionally
+    // fast-forwarding through near-static frames after a short idle period.
     const tick = (timestamp: number) => {
       const currentShot = challengeShotRef.current;
       if (!currentShot || currentShot.visibleCount >= currentShot.points.length) {
@@ -143,6 +154,8 @@ export function useChallengePlayback(
         ? challengeShot.hit
         : false;
 
+  // Ignore hover input while the auto-scrub animation is in control. Once the
+  // user deliberately hovers, ownership of the analysis point becomes manual.
   const handleManualAnalysisPointChange = useCallback((point: TrajectoryPoint | null) => {
     if (isAutoScrubbing) return;
     if (analysisSource === "auto") {
@@ -160,6 +173,7 @@ export function useChallengePlayback(
     setActiveAnalysisPoint(point);
   }, [analysisSource, isAutoScrubbing]);
 
+  // Firing snapshots the current live trajectory into challenge playback state.
   const fire = useCallback(() => {
     if (mode !== "challenge") return;
     staticFrameStreakRef.current = 0;
@@ -176,6 +190,7 @@ export function useChallengePlayback(
     setChallengeShot(shot);
   }, [hit, mode, points]);
 
+  // Returning to live mode should fully discard any challenge playback state.
   const resetForLiveMode = useCallback(() => {
     staticFrameStreakRef.current = 0;
     setIsAutoScrubbing(false);
@@ -185,6 +200,8 @@ export function useChallengePlayback(
     setChallengeShot(null);
   }, []);
 
+  // Entering challenge mode keeps the current controls/trajectory but clears
+  // stale analysis state from prior hovering or playback.
   const resetForChallengeMode = useCallback(() => {
     setAnalysisSource("none");
     setActiveAnalysisPoint(null);
